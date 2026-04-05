@@ -1,0 +1,1856 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0a0a0f">
+<title>ChessLens</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+:root {
+  --bg:        #0a0a0f;
+  --surface:   #111118;
+  --surface2:  #1a1a24;
+  --surface3:  #222230;
+  --border:    #2a2a3a;
+  --border2:   #3a3a50;
+  --accent:    #4af0c0;
+  --accent2:   #f0c040;
+  --accent3:   #a060ff;
+  --text:      #e8e8f0;
+  --text-dim:  #7070a0;
+  --text-mute: #404058;
+  --light-sq:  #f0d9b5;
+  --dark-sq:   #b58863;
+  --danger:    #ff5060;
+  --success:   #40d080;
+  --mono: 'Space Mono', monospace;
+  --sans: 'DM Sans', sans-serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%; overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── SCREEN SYSTEM ── */
+.screen {
+  display: none;
+  position: fixed;
+  inset: 0;
+  flex-direction: column;
+  height: 100dvh;
+}
+.screen.active { display: flex; }
+
+/* ══════════════════════════════════
+   SPLASH SCREEN
+══════════════════════════════════ */
+#s-splash {
+  background: var(--bg);
+  overflow: hidden;
+  justify-content: flex-end;
+  padding-bottom: env(safe-area-inset-bottom, 20px);
+}
+
+.splash-bg {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.splash-grid {
+  position: absolute;
+  inset: -50px;
+  background-image:
+    linear-gradient(rgba(74,240,192,0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(74,240,192,0.06) 1px, transparent 1px);
+  background-size: 40px 40px;
+  animation: gridShift 20s linear infinite;
+}
+@keyframes gridShift {
+  to { transform: translate(40px, 40px); }
+}
+.splash-glow {
+  position: absolute;
+  top: -20%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(ellipse, rgba(74,240,192,0.12) 0%, rgba(160,96,255,0.08) 40%, transparent 70%);
+  animation: glowPulse 4s ease-in-out infinite;
+}
+@keyframes glowPulse {
+  0%,100% { opacity: 0.8; transform: translateX(-50%) scale(1); }
+  50% { opacity: 1; transform: translateX(-50%) scale(1.05); }
+}
+
+.splash-hero {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 55%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.splash-icon {
+  font-size: 72px;
+  line-height: 1;
+  filter: drop-shadow(0 0 30px rgba(74,240,192,0.5));
+  animation: iconFloat 3s ease-in-out infinite;
+}
+@keyframes iconFloat {
+  0%,100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+.splash-wordmark {
+  font-family: var(--mono);
+  font-size: 38px;
+  font-weight: 700;
+  letter-spacing: -2px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 60%, var(--accent3) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.splash-tagline {
+  font-size: 14px;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
+  font-weight: 300;
+}
+
+.splash-content {
+  position: relative;
+  background: linear-gradient(180deg, transparent 0%, var(--surface) 30%);
+  padding: 40px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.feature-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.feature-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.feat-icon {
+  font-size: 22px;
+  width: 30px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.feat-text { font-size: 14px; color: var(--text-dim); line-height: 1.4; }
+.feat-text strong { color: var(--text); font-weight: 500; }
+
+.splash-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 15px 24px;
+  border-radius: 12px;
+  border: none;
+  font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: opacity 0.15s, transform 0.1s;
+  letter-spacing: 0.2px;
+}
+.btn:active { transform: scale(0.97); opacity: 0.85; }
+
+.btn-primary {
+  background: var(--accent);
+  color: #000;
+}
+.btn-ghost {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+.btn-surface {
+  background: var(--surface2);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-sm {
+  padding: 9px 16px;
+  font-size: 13px;
+  border-radius: 9px;
+}
+.btn-icon-only {
+  width: 40px; height: 40px;
+  padding: 0;
+  border-radius: 10px;
+  font-size: 18px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+/* ══════════════════════════════════
+   SCAN SCREEN
+══════════════════════════════════ */
+#s-scan {
+  background: #000;
+  position: relative;
+}
+
+#video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+#scan-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.scan-topbar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 16px;
+  padding-top: calc(16px + env(safe-area-inset-top, 0px));
+  background: linear-gradient(to bottom, rgba(0,0,0,0.7) 0%, transparent 100%);
+}
+
+.scan-logo {
+  font-family: var(--mono);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: -1px;
+}
+
+.scan-bottombar {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  z-index: 10;
+  padding: 16px 20px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.detection-pill {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.pill-searching {
+  background: rgba(240,192,64,0.15);
+  color: var(--accent2);
+  border: 1px solid rgba(240,192,64,0.3);
+}
+.pill-found {
+  background: rgba(64,208,128,0.15);
+  color: var(--success);
+  border: 1px solid rgba(64,208,128,0.3);
+}
+
+.capture-ring {
+  width: 76px; height: 76px;
+  border-radius: 50%;
+  border: 3px solid rgba(255,255,255,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.1s;
+}
+.capture-ring:active { transform: scale(0.9); }
+.capture-inner {
+  width: 60px; height: 60px;
+  border-radius: 50%;
+  background: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+}
+
+.scan-hint {
+  font-size: 12px;
+  color: rgba(255,255,255,0.5);
+  text-align: center;
+  font-weight: 300;
+}
+
+/* ══════════════════════════════════
+   ADJUST SCREEN
+══════════════════════════════════ */
+#s-adjust {
+  background: var(--bg);
+}
+
+.adjust-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  padding-top: calc(14px + env(safe-area-inset-top, 0px));
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.adjust-title {
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.adjust-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  padding: 12px;
+  gap: 12px;
+}
+
+#adjust-canvas-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  width: 100%;
+}
+
+#adjust-canvas {
+  max-width: 100%;
+  max-height: 100%;
+  display: block;
+  border-radius: 4px;
+}
+
+.corner-handle {
+  position: fixed;
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 3px solid white;
+  transform: translate(-50%, -50%);
+  z-index: 50;
+  touch-action: none;
+  cursor: grab;
+  box-shadow: 0 2px 12px rgba(74,240,192,0.5);
+  transition: box-shadow 0.1s;
+}
+.corner-handle:active { box-shadow: 0 0 20px rgba(74,240,192,0.9); }
+
+.preview-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  width: 100%;
+}
+.preview-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+#preview-canvas {
+  border-radius: 6px;
+  border: 1px solid var(--border2);
+  flex-shrink: 0;
+}
+
+.adjust-bottombar {
+  display: flex;
+  gap: 10px;
+  padding: 12px 16px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+
+/* ══════════════════════════════════
+   BOARD SCREEN
+══════════════════════════════════ */
+#s-board {
+  background: var(--bg);
+}
+
+.board-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  padding-top: calc(14px + env(safe-area-inset-top, 0px));
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.board-logo {
+  font-family: var(--mono);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: -1px;
+}
+.topbar-actions { display: flex; gap: 8px; }
+
+.board-area {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  min-height: 0;
+}
+
+#chess-board {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  width: min(calc(100vw - 24px), calc(100dvh - 220px));
+  height: min(calc(100vw - 24px), calc(100dvh - 220px));
+  border-radius: 3px;
+  overflow: hidden;
+  box-shadow: 0 0 0 2px var(--border2), 0 8px 40px rgba(0,0,0,0.6);
+  position: relative;
+}
+
+.sq {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  overflow: hidden;
+}
+.sq.light { background: var(--light-sq); }
+.sq.dark  { background: var(--dark-sq); }
+.sq.selected::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 3px solid rgba(74,240,192,0.9);
+  border-radius: 1px;
+  pointer-events: none;
+}
+.sq.highlight-sq { filter: brightness(1.15) saturate(0.85); }
+.sq img {
+  width: 88%;
+  height: 88%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.sq-lbl {
+  position: absolute;
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 700;
+  opacity: 0.55;
+  line-height: 1;
+  pointer-events: none;
+}
+.sq-lbl-rank { bottom: 2px; left: 3px; }
+.sq-lbl-file { bottom: 2px; right: 3px; }
+
+.unknown-badge {
+  position: absolute;
+  top: 2px; right: 2px;
+  background: var(--accent2);
+  color: #000;
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 700;
+  border-radius: 3px;
+  padding: 1px 3px;
+  line-height: 1.3;
+  pointer-events: none;
+}
+
+.fen-bar {
+  padding: 8px 14px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+.fen-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  flex-shrink: 0;
+  font-weight: 700;
+}
+.fen-text {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fen-copy-icon { font-size: 14px; flex-shrink: 0; }
+
+.tools-bar {
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px;
+  padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  overflow-x: auto;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.tools-bar::-webkit-scrollbar { display: none; }
+
+.tool-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, border-color 0.15s;
+}
+.tool-chip:active { background: var(--surface3); }
+.tool-chip.active {
+  background: rgba(74,240,192,0.12);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ══════════════════════════════════
+   PIECE MODAL
+══════════════════════════════════ */
+.modal-bg {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.75);
+  z-index: 100;
+  display: none;
+  align-items: flex-end;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+}
+.modal-bg.open { display: flex; }
+
+.piece-sheet {
+  background: var(--surface);
+  border-radius: 20px 20px 0 0;
+  border-top: 1px solid var(--border2);
+  padding: 20px 16px;
+  padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  width: 100%;
+  max-width: 480px;
+  animation: slideUp 0.25s ease;
+}
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+}
+
+.sheet-handle {
+  width: 40px; height: 4px;
+  background: var(--border2);
+  border-radius: 2px;
+  margin: 0 auto 16px;
+}
+.sheet-title {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: center;
+  margin-bottom: 16px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+}
+
+.piece-section-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text-mute);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+  padding-left: 2px;
+}
+
+.piece-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  justify-content: center;
+}
+.piece-opt {
+  width: 52px; height: 52px;
+  border-radius: 10px;
+  border: 2px solid var(--border);
+  background: var(--surface2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: all 0.1s;
+}
+.piece-opt:active { opacity: 0.7; transform: scale(0.93); }
+.piece-opt.sel {
+  border-color: var(--accent);
+  background: rgba(74,240,192,0.1);
+}
+.piece-opt img { width: 80%; height: 80%; object-fit: contain; }
+.piece-opt.empty-opt {
+  font-size: 20px;
+  color: var(--text-mute);
+}
+.piece-opt.empty-opt.sel { color: var(--danger); border-color: var(--danger); }
+.piece-opt .piece-letter {
+  font-family: var(--mono);
+  font-size: 22px;
+  line-height: 1;
+  color: var(--text);
+}
+
+.sheet-cancel {
+  margin-top: 12px;
+  width: 100%;
+  padding: 13px;
+  border-radius: 10px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--sans);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+/* ══════════════════════════════════
+   LOADING OVERLAY
+══════════════════════════════════ */
+#loading-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10,10,15,0.9);
+  z-index: 200;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  backdrop-filter: blur(8px);
+}
+#loading-overlay.show { display: flex; }
+
+.loading-spinner {
+  width: 48px; height: 48px;
+  border-radius: 50%;
+  border: 3px solid var(--surface3);
+  border-top-color: var(--accent);
+  animation: spin 0.75s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.loading-msg {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
+}
+.loading-sub {
+  font-size: 12px;
+  color: var(--text-mute);
+}
+
+/* ══════════════════════════════════
+   TOAST
+══════════════════════════════════ */
+#toast {
+  position: fixed;
+  bottom: 120px;
+  left: 50%;
+  transform: translateX(-50%) translateY(8px);
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: 10px;
+  padding: 10px 20px;
+  font-size: 13px;
+  color: var(--text);
+  z-index: 500;
+  opacity: 0;
+  pointer-events: none;
+  white-space: nowrap;
+  font-family: var(--mono);
+  transition: opacity 0.25s, transform 0.25s;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+}
+#toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- LOADING OVERLAY                                         -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div id="loading-overlay">
+  <div class="loading-spinner"></div>
+  <div class="loading-msg" id="loading-msg">Processing...</div>
+  <div class="loading-sub" id="loading-sub"></div>
+</div>
+
+<!-- TOAST -->
+<div id="toast"></div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- SPLASH SCREEN                                           -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div id="s-splash" class="screen active">
+  <div class="splash-bg">
+    <div class="splash-grid"></div>
+    <div class="splash-glow"></div>
+  </div>
+
+  <div class="splash-hero">
+    <div class="splash-icon">♞</div>
+    <div class="splash-wordmark">ChessLens</div>
+    <div class="splash-tagline">Scan any Lichess board instantly</div>
+  </div>
+
+  <div class="splash-content">
+    <div class="feature-list">
+      <div class="feature-row">
+        <span class="feat-icon">📷</span>
+        <div class="feat-text"><strong>Point & Capture</strong> — aim at a Lichess board on any screen</div>
+      </div>
+      <div class="feature-row">
+        <span class="feat-icon">🔍</span>
+        <div class="feat-text"><strong>Auto-detection</strong> — board colors are recognized automatically</div>
+      </div>
+      <div class="feature-row">
+        <span class="feat-icon">📋</span>
+        <div class="feat-text"><strong>Export FEN</strong> — copy to clipboard or open in Lichess analysis</div>
+      </div>
+    </div>
+    <div class="splash-actions">
+      <button class="btn btn-primary" onclick="App.startCamera()">
+        <span>📷</span> Open Camera & Scan
+      </button>
+      <button class="btn btn-ghost" onclick="App.startManual()">
+        Set up board manually
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- SCAN SCREEN                                             -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div id="s-scan" class="screen">
+  <video id="video" playsinline muted autoplay></video>
+  <canvas id="scan-overlay"></canvas>
+
+  <div class="scan-topbar">
+    <button class="btn btn-icon-only" onclick="App.goSplash()">←</button>
+    <span class="scan-logo">ChessLens</span>
+    <button class="btn btn-icon-only" id="flip-cam-btn" onclick="App.flipCamera()">⟳</button>
+  </div>
+
+  <div class="scan-bottombar">
+    <div class="detection-pill pill-searching" id="detect-pill">◈ Searching for board…</div>
+    <div class="capture-ring" onclick="App.captureFrame()">
+      <div class="capture-inner">📷</div>
+    </div>
+    <div class="scan-hint">Point at a Lichess board • tap to capture</div>
+    <div style="height:8px"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- ADJUST SCREEN                                           -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div id="s-adjust" class="screen">
+  <div class="adjust-topbar">
+    <button class="btn btn-surface btn-sm" onclick="App.goScan()">← Rescan</button>
+    <span class="adjust-title">Align Corners</span>
+    <button class="btn btn-primary btn-sm" onclick="App.processBoard()">Analyze →</button>
+  </div>
+
+  <div class="adjust-main">
+    <div id="adjust-canvas-wrap">
+      <canvas id="adjust-canvas"></canvas>
+      <div class="corner-handle" id="ch0" data-i="0"></div>
+      <div class="corner-handle" id="ch1" data-i="1"></div>
+      <div class="corner-handle" id="ch2" data-i="2"></div>
+      <div class="corner-handle" id="ch3" data-i="3"></div>
+    </div>
+  </div>
+
+  <div class="preview-row">
+    <span class="preview-label">Preview</span>
+    <canvas id="preview-canvas" width="100" height="100"></canvas>
+    <div style="flex:1;font-size:12px;color:var(--text-dim);line-height:1.5">
+      Drag the <span style="color:var(--accent);font-weight:600">corner dots</span> to align precisely with the board edges
+    </div>
+  </div>
+
+  <div class="adjust-bottombar">
+    <button class="btn btn-surface" style="flex:1" onclick="App.resetCorners()">Reset Corners</button>
+    <button class="btn btn-primary" style="flex:2" onclick="App.processBoard()">⚡ Analyze Board</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- BOARD SCREEN                                            -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div id="s-board" class="screen">
+  <div class="board-topbar">
+    <button class="btn btn-icon-only" onclick="App.goScan()">📷</button>
+    <span class="board-logo">ChessLens</span>
+    <div class="topbar-actions">
+      <button class="btn btn-icon-only" onclick="App.flipBoard()" title="Flip board">⇅</button>
+    </div>
+  </div>
+
+  <div class="board-area">
+    <div id="chess-board"></div>
+  </div>
+
+  <div class="fen-bar" onclick="App.copyFen()">
+    <span class="fen-label">FEN</span>
+    <span class="fen-text" id="fen-text">—</span>
+    <span class="fen-copy-icon">⎘</span>
+  </div>
+
+  <div class="tools-bar">
+    <button class="tool-chip" onclick="App.goScan()">📷 Rescan</button>
+    <button class="tool-chip" onclick="App.copyFen()">⎘ Copy FEN</button>
+    <button class="tool-chip" onclick="App.openLichess()">🔗 Lichess Analysis</button>
+    <button class="tool-chip" onclick="App.clearBoard()">✕ Clear</button>
+    <button class="tool-chip" onclick="App.setStartPos()">♙ Start Position</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- PIECE SELECTION MODAL                                   -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="modal-bg" id="piece-modal">
+  <div class="piece-sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="sheet-title">Select piece</div>
+    <div class="piece-section-label">White pieces</div>
+    <div class="piece-row" id="white-pieces-row"></div>
+    <div class="piece-section-label" style="margin-top:8px">Black pieces</div>
+    <div class="piece-row" id="black-pieces-row"></div>
+    <div class="piece-row" style="margin-top:8px">
+      <div class="piece-opt empty-opt" id="empty-opt" onclick="App.setPiece(null)">✕</div>
+    </div>
+    <button class="sheet-cancel" onclick="App.closeModal()">Cancel</button>
+  </div>
+</div>
+
+<!-- Hidden processing canvas -->
+<canvas id="proc-canvas" style="display:none"></canvas>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// ChessLens — Main Application
+// ═══════════════════════════════════════════════════════════════
+
+const LICHESS_PIECES_BASE = 'https://lichess1.org/assets/piece/cburnett/';
+const PIECE_TYPES   = ['K','Q','R','B','N','P'];
+const PIECE_COLORS  = ['w','b'];
+const PIECE_UNICODE = {
+  wK:'♔',wQ:'♕',wR:'♖',wB:'♗',wN:'♘',wP:'♙',
+  bK:'♚',bQ:'♛',bR:'♜',bB:'♝',bN:'♞',bP:'♟'
+};
+
+// Lichess board colors (RGB)
+const LICHESS_COLORS = {
+  lightSq:   [240, 217, 181],  // #F0D9B5
+  darkSq:    [181, 136,  99],  // #B58863
+  lightHL:   [205, 210, 106],  // #CDD26A
+  darkHL:    [170, 162,  58],  // #AAA23A
+};
+
+const App = (() => {
+  // ── State ─────────────────────────────────────────────────
+  let _stream     = null;
+  let _facingMode = 'environment';
+  let _frameData  = null;  // full-res ImageData of captured frame
+  let _frameW     = 0, _frameH = 0;
+  let _corners    = [[0.1,0.1],[0.9,0.1],[0.9,0.9],[0.1,0.9]]; // normalized [x,y]
+  let _boardState = emptyBoard(); // 8x8 array of null | {color:'w'|'b', type:'K'|'Q'|...'P'}
+  let _flipped    = false;
+  let _editSq     = null;  // {row, col}
+  let _pieceImgs  = {};    // key → HTMLImageElement
+  let _pieceMasks = {};    // key → Uint8Array (50×50 alpha mask)
+  let _detLoop    = null;
+  let _lastRect   = null;
+  let _adjustScale= 1;
+
+  // ── Init ───────────────────────────────────────────────────
+  async function init() {
+    await preloadPieces();
+    buildPieceModal();
+  }
+
+  async function preloadPieces() {
+    const promises = [];
+    for (const c of PIECE_COLORS) {
+      for (const t of PIECE_TYPES) {
+        promises.push(loadPieceImg(c + t));
+      }
+    }
+    await Promise.allSettled(promises);
+  }
+
+  function loadPieceImg(key) {
+    return new Promise(resolve => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => { _pieceImgs[key] = img; resolve(); };
+      img.onerror = resolve;
+      img.src = LICHESS_PIECES_BASE + key + '.svg';
+    });
+  }
+
+  // ── Screen navigation ──────────────────────────────────────
+  function showScreen(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+  }
+
+  function goSplash() {
+    stopDetection();
+    stopCamera();
+    showScreen('s-splash');
+  }
+
+  function goScan() {
+    showScreen('s-scan');
+    if (!_stream) startCamera();
+    else startDetection();
+  }
+
+  // ── Loading / Toast ────────────────────────────────────────
+  function showLoad(msg = 'Processing...', sub = '') {
+    document.getElementById('loading-msg').textContent = msg;
+    document.getElementById('loading-sub').textContent = sub;
+    document.getElementById('loading-overlay').classList.add('show');
+  }
+  function hideLoad() {
+    document.getElementById('loading-overlay').classList.remove('show');
+  }
+
+  let _toastTimer = null;
+  function toast(msg, ms = 2200) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(() => el.classList.remove('show'), ms);
+  }
+
+  // ── Camera ─────────────────────────────────────────────────
+  async function startCamera() {
+    showLoad('Starting camera…');
+    try {
+      _stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: _facingMode, width: {ideal:1920}, height: {ideal:1080} },
+        audio: false
+      });
+      const vid = document.getElementById('video');
+      vid.srcObject = _stream;
+      await vid.play();
+      hideLoad();
+      showScreen('s-scan');
+      startDetection();
+    } catch(e) {
+      hideLoad();
+      alert('Camera access required. Please allow camera permissions and refresh.');
+      showScreen('s-splash');
+    }
+  }
+
+  function stopCamera() {
+    if (_stream) { _stream.getTracks().forEach(t => t.stop()); _stream = null; }
+  }
+
+  function flipCamera() {
+    _facingMode = _facingMode === 'environment' ? 'user' : 'environment';
+    stopDetection();
+    stopCamera();
+    startCamera();
+  }
+
+  // ── Detection loop ─────────────────────────────────────────
+  let _detFrame = 0;
+  function startDetection() {
+    const vid  = document.getElementById('video');
+    const ov   = document.getElementById('scan-overlay');
+    let running = true;
+
+    function loop() {
+      if (!running) return;
+      if (!document.getElementById('s-scan').classList.contains('active')) { running = false; return; }
+
+      // Sync overlay size to video display size
+      const vw = vid.clientWidth  || 1;
+      const vh = vid.clientHeight || 1;
+      if (ov.width !== vw)  ov.width  = vw;
+      if (ov.height !== vh) ov.height = vh;
+
+      if (vid.readyState >= 2) {
+        drawScanGuide(ov);
+        if (++_detFrame % 12 === 0) runDetection(vid, ov);
+      }
+      _detLoop = requestAnimationFrame(loop);
+    }
+
+    _detLoop = requestAnimationFrame(loop);
+    return () => { running = false; cancelAnimationFrame(_detLoop); };
+  }
+
+  function stopDetection() {
+    if (_detLoop) { cancelAnimationFrame(_detLoop); _detLoop = null; }
+  }
+
+  function drawScanGuide(canvas) {
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    if (_lastRect) {
+      const sx = w / (_frameW || w);
+      const sy = h / (_frameH || h);
+      // draw last detected rectangle
+      const rx = _lastRect.x * sx, ry = _lastRect.y * sy;
+      const rw = _lastRect.w * sx, rh = _lastRect.h * sy;
+
+      ctx.strokeStyle = '#4af0c0';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([8,4]);
+      ctx.strokeRect(rx, ry, rw, rh);
+      ctx.setLineDash([]);
+
+      // Corner ticks
+      const cs = 18;
+      [[rx,ry],[rx+rw,ry],[rx,ry+rh],[rx+rw,ry+rh]].forEach(([cx,cy], i) => {
+        const dx = i % 2 === 0 ? cs : -cs;
+        const dy = i < 2 ? cs : -cs;
+        ctx.strokeStyle = '#f0c040';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(cx + dx, cy);
+        ctx.lineTo(cx, cy);
+        ctx.lineTo(cx, cy + dy);
+        ctx.stroke();
+      });
+    }
+  }
+
+  function runDetection(vid, ov) {
+    if (vid.videoWidth === 0) return;
+    const proc = document.getElementById('proc-canvas');
+    const scale = Math.min(1, 640 / vid.videoWidth);
+    proc.width  = Math.round(vid.videoWidth  * scale);
+    proc.height = Math.round(vid.videoHeight * scale);
+
+    const ctx = proc.getContext('2d');
+    ctx.drawImage(vid, 0, 0, proc.width, proc.height);
+
+    const imgData = ctx.getImageData(0, 0, proc.width, proc.height);
+    const rect = detectBoardRegion(imgData.data, proc.width, proc.height);
+
+    const pill = document.getElementById('detect-pill');
+    if (rect) {
+      _lastRect = {
+        x: rect.x / scale, y: rect.y / scale,
+        w: rect.w / scale,  h: rect.h / scale
+      };
+      pill.className = 'detection-pill pill-found';
+      pill.textContent = '✓ Board detected — tap to capture';
+    } else {
+      _lastRect = null;
+      pill.className = 'detection-pill pill-searching';
+      pill.textContent = '◈ Searching for board…';
+    }
+  }
+
+  // ── Board region detection via Lichess color fingerprint ──
+  function colorMatchesLichess(r, g, b, tol = 48) {
+    const cs = LICHESS_COLORS;
+    const targets = [cs.lightSq, cs.darkSq, cs.lightHL, cs.darkHL];
+    return targets.some(([tr,tg,tb]) =>
+      Math.abs(r-tr) < tol && Math.abs(g-tg) < tol && Math.abs(b-tb) < tol
+    );
+  }
+
+  function detectBoardRegion(data, width, height) {
+    let minX = width, maxX = 0, minY = height, maxY = 0;
+    let count = 0;
+
+    // Sample every other pixel for speed
+    for (let y = 0; y < height; y += 2) {
+      for (let x = 0; x < width; x += 2) {
+        const i = (y * width + x) * 4;
+        if (colorMatchesLichess(data[i], data[i+1], data[i+2])) {
+          count++;
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+
+    // Need a meaningful number of board pixels
+    if (count < (width * height) / (4 * 100)) return null;
+
+    const bw = maxX - minX, bh = maxY - minY;
+    if (bw < 40 || bh < 40) return null;
+
+    // Sanity: chess board should be roughly square
+    const ratio = bw / bh;
+    if (ratio < 0.55 || ratio > 1.8) return null;
+
+    // Add small padding
+    const pad = 4;
+    return {
+      x: Math.max(0, minX - pad),
+      y: Math.max(0, minY - pad),
+      w: Math.min(width - minX, bw + pad * 2),
+      h: Math.min(height - minY, bh + pad * 2)
+    };
+  }
+
+  // ── Capture frame ──────────────────────────────────────────
+  function captureFrame() {
+    const vid = document.getElementById('video');
+    if (!vid || vid.videoWidth === 0) { toast('Camera not ready'); return; }
+
+    const proc = document.getElementById('proc-canvas');
+    proc.width  = vid.videoWidth;
+    proc.height = vid.videoHeight;
+    const ctx = proc.getContext('2d');
+    ctx.drawImage(vid, 0, 0);
+
+    _frameW = proc.width;
+    _frameH = proc.height;
+    _frameData = ctx.getImageData(0, 0, _frameW, _frameH);
+
+    stopDetection();
+    stopCamera();
+    setupAdjustScreen();
+    showScreen('s-adjust');
+  }
+
+  // ── Adjust screen ──────────────────────────────────────────
+  function setupAdjustScreen() {
+    const canvas = document.getElementById('adjust-canvas');
+    const wrap   = document.getElementById('adjust-canvas-wrap');
+
+    const wrapRect = wrap.getBoundingClientRect();
+    const maxW = wrapRect.width  - 16;
+    const maxH = wrapRect.height - 16;
+    _adjustScale = Math.min(maxW / _frameW, maxH / _frameH, 1);
+
+    canvas.width  = _frameW;
+    canvas.height = _frameH;
+    canvas.style.width  = (_frameW * _adjustScale) + 'px';
+    canvas.style.height = (_frameH * _adjustScale) + 'px';
+
+    const ctx = canvas.getContext('2d');
+    ctx.putImageData(_frameData, 0, 0);
+
+    // Initialize corners from detected rect or default
+    if (_lastRect) {
+      const r = _lastRect;
+      _corners = [
+        [r.x / _frameW,           r.y / _frameH],
+        [(r.x + r.w) / _frameW,   r.y / _frameH],
+        [(r.x + r.w) / _frameW,   (r.y + r.h) / _frameH],
+        [r.x / _frameW,           (r.y + r.h) / _frameH]
+      ];
+    } else {
+      _corners = [[0.1,0.1],[0.9,0.1],[0.9,0.9],[0.1,0.9]];
+    }
+
+    positionHandles();
+    setupDrag();
+    updatePreview();
+  }
+
+  function positionHandles() {
+    const canvas = document.getElementById('adjust-canvas');
+    const rect   = canvas.getBoundingClientRect();
+
+    _corners.forEach(([nx, ny], i) => {
+      const el = document.getElementById('ch' + i);
+      el.style.left = (rect.left + nx * rect.width)  + 'px';
+      el.style.top  = (rect.top  + ny * rect.height) + 'px';
+    });
+  }
+
+  function resetCorners() {
+    _corners = [[0.1,0.1],[0.9,0.1],[0.9,0.9],[0.1,0.9]];
+    positionHandles();
+    updatePreview();
+  }
+
+  function setupDrag() {
+    for (let i = 0; i < 4; i++) {
+      const el = document.getElementById('ch' + i);
+      el.onmousedown  = (e) => startDrag(e, i);
+      el.ontouchstart = (e) => startDrag(e, i);
+    }
+  }
+
+  function startDrag(e, i) {
+    e.preventDefault();
+
+    const onMove = (ev) => {
+      ev.preventDefault && ev.preventDefault();
+      const { clientX, clientY } = ev.touches ? ev.touches[0] : ev;
+      const canvas = document.getElementById('adjust-canvas');
+      const rect   = canvas.getBoundingClientRect();
+
+      let nx = (clientX - rect.left) / rect.width;
+      let ny = (clientY - rect.top)  / rect.height;
+      nx = Math.max(0, Math.min(1, nx));
+      ny = Math.max(0, Math.min(1, ny));
+
+      _corners[i] = [nx, ny];
+
+      const el = document.getElementById('ch' + i);
+      el.style.left = clientX + 'px';
+      el.style.top  = clientY + 'px';
+
+      updatePreview();
+    };
+
+    const onEnd = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('mouseup',   onEnd);
+      window.removeEventListener('touchend',  onEnd);
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('mouseup',   onEnd);
+    window.addEventListener('touchend',  onEnd);
+  }
+
+  function updatePreview() {
+    const prev = document.getElementById('preview-canvas');
+    const pCtx = prev.getContext('2d');
+    const pSize = 100;
+
+    const srcPts = _corners.map(([nx, ny]) => [nx * _frameW, ny * _frameH]);
+    const dstPts = [[0,0],[pSize,0],[pSize,pSize],[0,pSize]];
+
+    try {
+      const warped = warpPerspective(_frameData, _frameW, _frameH, srcPts, dstPts, pSize, pSize);
+      pCtx.putImageData(warped, 0, 0);
+
+      // Draw 8x8 grid overlay
+      pCtx.strokeStyle = 'rgba(74,240,192,0.35)';
+      pCtx.lineWidth = 0.5;
+      for (let g = 1; g < 8; g++) {
+        const pos = (pSize / 8) * g;
+        pCtx.beginPath(); pCtx.moveTo(pos, 0); pCtx.lineTo(pos, pSize); pCtx.stroke();
+        pCtx.beginPath(); pCtx.moveTo(0, pos); pCtx.lineTo(pSize, pos); pCtx.stroke();
+      }
+    } catch(_) {}
+  }
+
+  // ── Perspective transform (pure JS DLT) ───────────────────
+
+  function solveLinear8(A, b) {
+    const n = 8;
+    const aug = A.map((row, i) => [...row, b[i]]);
+
+    for (let col = 0; col < n; col++) {
+      let mxRow = col;
+      for (let r = col+1; r < n; r++)
+        if (Math.abs(aug[r][col]) > Math.abs(aug[mxRow][col])) mxRow = r;
+      [aug[col], aug[mxRow]] = [aug[mxRow], aug[col]];
+
+      const piv = aug[col][col];
+      if (Math.abs(piv) < 1e-12) continue;
+
+      for (let r = col+1; r < n; r++) {
+        const f = aug[r][col] / piv;
+        for (let k = col; k <= n; k++) aug[r][k] -= f * aug[col][k];
+      }
+    }
+
+    const x = new Float64Array(n);
+    for (let i = n-1; i >= 0; i--) {
+      if (Math.abs(aug[i][i]) < 1e-12) continue;
+      let s = aug[i][n];
+      for (let j = i+1; j < n; j++) s -= aug[i][j] * x[j];
+      x[i] = s / aug[i][i];
+    }
+    return x;
+  }
+
+  function computeH(src, dst) {
+    // DLT: find H such that dst_i ~ H * src_i
+    const A = [], b = [];
+    for (let i = 0; i < 4; i++) {
+      const [sx, sy] = src[i];
+      const [dx, dy] = dst[i];
+      A.push([sx, sy, 1, 0, 0, 0, -dx*sx, -dx*sy]);
+      b.push(dx);
+      A.push([0, 0, 0, sx, sy, 1, -dy*sx, -dy*sy]);
+      b.push(dy);
+    }
+    const h = solveLinear8(A, b);
+    return [...h, 1]; // 9 elements
+  }
+
+  function applyH(h, x, y) {
+    const w = h[6]*x + h[7]*y + h[8];
+    return [(h[0]*x + h[1]*y + h[2])/w, (h[3]*x + h[4]*y + h[5])/w];
+  }
+
+  function warpPerspective(srcImgData, srcW, srcH, srcPts, dstPts, dstW, dstH) {
+    // Inverse mapping: for each dst pixel, find src pixel
+    const H = computeH(dstPts, srcPts); // inverse direction
+    const dst = new ImageData(dstW, dstH);
+    const sd  = srcImgData.data;
+    const dd  = dst.data;
+
+    for (let dy = 0; dy < dstH; dy++) {
+      for (let dx = 0; dx < dstW; dx++) {
+        const [sx, sy] = applyH(H, dx, dy);
+        const x0 = sx | 0, y0 = sy | 0;
+        const x1 = x0 + 1, y1 = y0 + 1;
+        if (x0 < 0 || y0 < 0 || x1 >= srcW || y1 >= srcH) continue;
+
+        const tx = sx - x0, ty = sy - y0;
+        const di = (dy * dstW + dx) * 4;
+
+        for (let c = 0; c < 3; c++) {
+          dd[di+c] = Math.round(
+            sd[(y0*srcW+x0)*4+c] * (1-tx)*(1-ty) +
+            sd[(y0*srcW+x1)*4+c] * tx*(1-ty) +
+            sd[(y1*srcW+x0)*4+c] * (1-tx)*ty +
+            sd[(y1*srcW+x1)*4+c] * tx*ty
+          );
+        }
+        dd[di+3] = 255;
+      }
+    }
+    return dst;
+  }
+
+  // ── Board processing ───────────────────────────────────────
+  async function processBoard() {
+    showLoad('Warping board…', 'Applying perspective correction');
+    await delay(50);
+
+    const BSIZE = 400; // internal board resolution
+    const srcPts = _corners.map(([nx,ny]) => [nx * _frameW, ny * _frameH]);
+    const dstPts = [[0,0],[BSIZE,0],[BSIZE,BSIZE],[0,BSIZE]];
+
+    let warpedData;
+    try {
+      warpedData = warpPerspective(_frameData, _frameW, _frameH, srcPts, dstPts, BSIZE, BSIZE);
+    } catch(e) {
+      hideLoad();
+      toast('⚠ Perspective transform failed. Adjust corners.');
+      return;
+    }
+
+    document.getElementById('loading-msg').textContent = 'Detecting pieces…';
+    document.getElementById('loading-sub').textContent = 'Analyzing 64 squares';
+    await delay(50);
+
+    _boardState = analyzeBoard(warpedData, BSIZE);
+
+    document.getElementById('loading-msg').textContent = 'Identifying piece types…';
+    document.getElementById('loading-sub').textContent = 'Template matching in progress';
+    await delay(50);
+
+    await identifyPieceTypes(warpedData, BSIZE);
+
+    hideLoad();
+    renderBoard();
+    showScreen('s-board');
+    toast('✓ Board analyzed — tap any square to edit');
+  }
+
+  // ── Square analysis ────────────────────────────────────────
+
+  function squareAvgColor(data, width, col, row, sqSize, margin = 0.12) {
+    const mg = Math.round(sqSize * margin);
+    const x0 = Math.round(col * sqSize) + mg;
+    const y0 = Math.round(row * sqSize) + mg;
+    const x1 = Math.round((col+1) * sqSize) - mg;
+    const y1 = Math.round((row+1) * sqSize) - mg;
+
+    let r=0,g=0,b=0,n=0;
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const i = (y*width+x)*4;
+        r += data[i]; g += data[i+1]; b += data[i+2];
+        n++;
+      }
+    }
+    if (!n) return [0,0,0];
+    return [r/n, g/n, b/n];
+  }
+
+  function colorDist(a, b) {
+    return Math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2);
+  }
+
+  function analyzeBoard(imgData, bSize) {
+    const { data, width } = imgData;
+    const sqSize = bSize / 8;
+    const cs = LICHESS_COLORS;
+    const result = [];
+
+    for (let row = 0; row < 8; row++) {
+      result.push([]);
+      for (let col = 0; col < 8; col++) {
+        const isLight = (row + col) % 2 === 0;
+        const emptyColor  = isLight ? cs.lightSq : cs.darkSq;
+        const hlColor     = isLight ? cs.lightHL  : cs.darkHL;
+
+        const avg = squareAvgColor(data, width, col, row, sqSize);
+        const distEmpty = colorDist(avg, emptyColor);
+        const distHL    = colorDist(avg, hlColor);
+        const bestDist  = Math.min(distEmpty, distHL);
+
+        if (bestDist < 28) {
+          result[row].push(null);
+          continue;
+        }
+
+        // Piece present — determine color
+        // Sample center pixels for piece color analysis
+        const mg = Math.round(sqSize * 0.18);
+        const x0 = Math.round(col * sqSize) + mg;
+        const y0 = Math.round(row * sqSize) + mg;
+        const x1 = Math.round((col+1) * sqSize) - mg;
+        const y1 = Math.round((row+1) * sqSize) - mg;
+
+        let whitePx = 0, blackPx = 0, total = 0;
+        for (let y = y0; y < y1; y++) {
+          for (let x = x0; x < x1; x++) {
+            const i = (y*width+x)*4;
+            const r = data[i], g = data[i+1], bv = data[i+2];
+            const br = (r+g+bv)/3;
+            if (r > 195 && g > 185 && bv > 165) whitePx++;
+            else if (r < 75 && g < 75 && bv < 75) blackPx++;
+            total++;
+          }
+        }
+
+        const wr = whitePx / total;
+        const br = blackPx / total;
+
+        let pieceColor;
+        if (isLight) {
+          pieceColor = (br > 0.10) ? 'b' : (wr > 0.20 ? 'w' : (avg[0]+avg[1]+avg[2])/3 > 185 ? 'w' : 'b');
+        } else {
+          pieceColor = (wr > 0.12) ? 'w' : (br > 0.15 ? 'b' : (avg[0]+avg[1]+avg[2])/3 > 140 ? 'w' : 'b');
+        }
+
+        result[row].push({ color: pieceColor, type: '?' });
+      }
+    }
+    return result;
+  }
+
+  // ── Piece type identification via silhouette matching ──────
+
+  function buildPieceMask(key) {
+    if (_pieceMasks[key]) return _pieceMasks[key];
+    const img = _pieceImgs[key];
+    if (!img) return null;
+
+    const c = document.createElement('canvas');
+    c.width = c.height = 50;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(img, 0, 0, 50, 50);
+    const d = ctx.getImageData(0, 0, 50, 50).data;
+    const mask = new Uint8Array(50*50);
+    for (let i = 0; i < 50*50; i++) mask[i] = d[i*4+3] > 100 ? 1 : 0;
+    _pieceMasks[key] = mask;
+    return mask;
+  }
+
+  function squareMask(imgData, bSize, col, row) {
+    const sqSize = bSize / 8;
+    const isLight = (row + col) % 2 === 0;
+    const bgColor = isLight ? LICHESS_COLORS.lightSq : LICHESS_COLORS.darkSq;
+
+    const outSize = 50;
+    const ratio = outSize / sqSize;
+    const { data, width } = imgData;
+    const mask = new Uint8Array(outSize * outSize);
+
+    for (let dy = 0; dy < outSize; dy++) {
+      for (let dx = 0; dx < outSize; dx++) {
+        const sx = Math.round(col * sqSize + dx / ratio);
+        const sy = Math.round(row * sqSize + dy / ratio);
+        const i = (sy * width + sx) * 4;
+        const r = data[i], g = data[i+1], b = data[i+2];
+        const dist = colorDist([r,g,b], bgColor);
+        mask[dy * outSize + dx] = dist > 22 ? 1 : 0;
+      }
+    }
+    return mask;
+  }
+
+  function maskSimilarity(m1, m2) {
+    // Jaccard similarity
+    let inter = 0, union = 0;
+    for (let i = 0; i < m1.length; i++) {
+      if (m1[i] || m2[i]) union++;
+      if (m1[i] && m2[i]) inter++;
+    }
+    return union === 0 ? 0 : inter / union;
+  }
+
+  async function identifyPieceTypes(imgData, bSize) {
+    // Pre-build all masks
+    for (const c of PIECE_COLORS)
+      for (const t of PIECE_TYPES)
+        buildPieceMask(c + t);
+
+    for (let row = 0; row < 8; row++) {
+      for (let col = 0; col < 8; col++) {
+        const cell = _boardState[row][col];
+        if (!cell || cell.type !== '?') continue;
+
+        const sqMask = squareMask(imgData, bSize, col, row);
+        let bestType = 'P', bestScore = -1;
+
+        for (const t of PIECE_TYPES) {
+          const key = cell.color + t;
+          const tm = _pieceMasks[key];
+          if (!tm) continue;
+          const score = maskSimilarity(sqMask, tm);
+          if (score > bestScore) { bestScore = score; bestType = t; }
+        }
+
+        // Confidence threshold — keep '?' if too low
+        cell.type = bestScore > 0.12 ? bestType : '?';
+      }
+    }
+  }
+
+  // ── Virtual board rendering ────────────────────────────────
+
+  function renderBoard() {
+    const boardEl = document.getElementById('chess-board');
+    boardEl.innerHTML = '';
+
+    for (let dispRow = 0; dispRow < 8; dispRow++) {
+      for (let dispCol = 0; dispCol < 8; dispCol++) {
+        const row = _flipped ? 7 - dispRow : dispRow;
+        const col = _flipped ? 7 - dispCol : dispCol;
+
+        const isLight = (dispRow + dispCol) % 2 === 0;
+        const sq = document.createElement('div');
+        sq.className = `sq ${isLight ? 'light' : 'dark'}`;
+        sq.dataset.row = row;
+        sq.dataset.col = col;
+
+        const piece = _boardState[row][col];
+        if (piece) {
+          const key = piece.color + (piece.type === '?' ? 'P' : piece.type);
+          if (_pieceImgs[key]) {
+            const img = document.createElement('img');
+            img.src = _pieceImgs[key].src;
+            img.alt = PIECE_UNICODE[key] || key;
+            sq.appendChild(img);
+          } else {
+            sq.textContent = PIECE_UNICODE[key] || '?';
+            sq.style.fontSize = 'calc(min(calc(100vw - 24px), calc(100dvh - 220px)) / 8 * 0.72)';
+          }
+          if (piece.type === '?') {
+            const badge = document.createElement('div');
+            badge.className = 'unknown-badge';
+            badge.textContent = '?';
+            sq.appendChild(badge);
+          }
+        }
+
+        // Coordinate labels
+        if (dispCol === 0) {
+          const lbl = document.createElement('span');
+          lbl.className = 'sq-lbl sq-lbl-rank';
+          lbl.textContent = _flipped ? dispRow + 1 : 8 - dispRow;
+          sq.appendChild(lbl);
+        }
+        if (dispRow === 7) {
+          const lbl = document.createElement('span');
+          lbl.className = 'sq-lbl sq-lbl-file';
+          lbl.textContent = String.fromCharCode(97 + (_flipped ? 7 - dispCol : dispCol));
+          sq.appendChild(lbl);
+        }
+
+        sq.addEventListener('click', () => openPieceModal(row, col));
+        boardEl.appendChild(sq);
+      }
+    }
+
+    updateFen();
+  }
+
+  // ── FEN ────────────────────────────────────────────────────
+
+  function generateFen() {
+    let fen = '';
+    for (let row = 0; row < 8; row++) {
+      let empty = 0;
+      for (let col = 0; col < 8; col++) {
+        const p = _boardState[row][col];
+        if (!p || p.type === '?') {
+          // treat '?' as unknown (skip or use pawn placeholder)
+          empty++;
+        } else {
+          if (empty) { fen += empty; empty = 0; }
+          const ch = p.type;
+          fen += p.color === 'w' ? ch.toUpperCase() : ch.toLowerCase();
+        }
+      }
+      if (empty) fen += empty;
+      if (row < 7) fen += '/';
+    }
+    fen += ' w - - 0 1';
+    return fen;
+  }
+
+  function updateFen() {
+    const fen = generateFen();
+    document.getElementById('fen-text').textContent = fen;
+  }
+
+  function copyFen() {
+    const fen = generateFen();
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(fen).then(() => toast('✓ FEN copied to clipboard'));
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = fen;
+      ta.style.cssText = 'position:fixed;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      toast('✓ FEN copied');
+    }
+  }
+
+  function openLichess() {
+    const fen = generateFen();
+    window.open('https://lichess.org/analysis/' + encodeURIComponent(fen), '_blank');
+  }
+
+  // ── Piece modal ────────────────────────────────────────────
+
+  function buildPieceModal() {
+    ['white-pieces-row','black-pieces-row'].forEach((rowId, ci) => {
+      const rowEl = document.getElementById(rowId);
+      const color = ci === 0 ? 'w' : 'b';
+      rowEl.innerHTML = '';
+      for (const t of PIECE_TYPES) {
+        const key = color + t;
+        const div = document.createElement('div');
+        div.className = 'piece-opt';
+        div.dataset.key = key;
+        div.onclick = () => App.setPiece({ color, type: t });
+
+        if (_pieceImgs[key]) {
+          const img = document.createElement('img');
+          img.src = _pieceImgs[key].src;
+          div.appendChild(img);
+        } else {
+          div.innerHTML = `<span class="piece-letter">${PIECE_UNICODE[key]||t}</span>`;
+        }
+        rowEl.appendChild(div);
+      }
+    });
+  }
+
+  function openPieceModal(row, col) {
+    _editSq = { row, col };
+    const file = String.fromCharCode(97 + col);
+    const rank = 8 - row;
+    document.getElementById('sheet-title').textContent = `Square ${file.toUpperCase()}${rank}`;
+
+    // Mark currently selected piece
+    const cur = _boardState[row][col];
+    document.querySelectorAll('.piece-opt').forEach(el => {
+      el.classList.remove('sel');
+      if (cur && el.dataset.key === cur.color + cur.type) el.classList.add('sel');
+    });
+    document.getElementById('empty-opt').classList.toggle('sel', !cur);
+
+    document.getElementById('piece-modal').classList.add('open');
+  }
+
+  function closeModal() {
+    document.getElementById('piece-modal').classList.remove('open');
+    _editSq = null;
+  }
+
+  function setPiece(piece) {
+    if (!_editSq) { closeModal(); return; }
+    const { row, col } = _editSq;
+    _boardState[row][col] = piece;
+    closeModal();
+    renderBoard();
+  }
+
+  // Close modal on backdrop click
+  document.getElementById('piece-modal').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closeModal();
+  });
+
+  // ── Board tools ────────────────────────────────────────────
+
+  function flipBoard() {
+    _flipped = !_flipped;
+    renderBoard();
+  }
+
+  function clearBoard() {
+    _boardState = emptyBoard();
+    renderBoard();
+  }
+
+  function setStartPos() {
+    const back = ['R','N','B','Q','K','B','N','R'];
+    _boardState = emptyBoard();
+    for (let col = 0; col < 8; col++) {
+      _boardState[0][col] = { color:'b', type: back[col] };
+      _boardState[1][col] = { color:'b', type: 'P' };
+      _boardState[6][col] = { color:'w', type: 'P' };
+      _boardState[7][col] = { color:'w', type: back[col] };
+    }
+    renderBoard();
+    toast('♟ Starting position set');
+  }
+
+  function startManual() {
+    setStartPos();
+    showScreen('s-board');
+  }
+
+  // ── Helpers ────────────────────────────────────────────────
+
+  function emptyBoard() {
+    return Array.from({ length: 8 }, () => Array(8).fill(null));
+  }
+
+  function delay(ms) {
+    return new Promise(r => setTimeout(r, ms));
+  }
+
+  // ── Public API ─────────────────────────────────────────────
+  return {
+    init,
+    startCamera,
+    goSplash,
+    goScan,
+    flipCamera,
+    captureFrame,
+    setupAdjustScreen,
+    resetCorners,
+    processBoard,
+    renderBoard,
+    flipBoard,
+    clearBoard,
+    setStartPos,
+    startManual,
+    copyFen,
+    openLichess,
+    openPieceModal,
+    closeModal,
+    setPiece,
+    updatePreview,
+  };
+})();
+
+// ── Boot ──────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => App.init());
+</script>
+</body>
+</html>
