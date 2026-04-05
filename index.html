@@ -1723,7 +1723,11 @@ const App = (() => {
 
   function openLichess() {
     const fen = generateFen();
-    window.open('https://lichess.org/analysis/' + encodeURIComponent(fen), '_blank');
+    // Lichess expects FEN in the URL path with spaces as underscores.
+    // Rank separators (/) must remain literal slashes — encodeURIComponent
+    // would turn them into %2F which Lichess does not recognise.
+    const fenPath = fen.replace(/ /g, '_');
+    window.open('https://lichess.org/analysis/' + fenPath, '_blank');
   }
 
   // ── Piece modal ────────────────────────────────────────────
