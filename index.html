@@ -1057,6 +1057,9 @@ const App = (() => {
     const vid  = document.getElementById('video');
     const ov   = document.getElementById('scan-overlay');
     let running = true;
+    _detStreak  = 0;
+    _smoothRect = null;
+    _lastRect   = null;
 
     function loop() {
       if (!running) return;
@@ -1131,14 +1134,28 @@ const App = (() => {
     const rect = detectBoardRegion(imgData.data, proc.width, proc.height);
 
     const pill = document.getElementById('detect-pill');
+
     if (rect) {
-      _lastRect = {
+      _detStreak++;
+      // Scale back to full video coords and smooth
+      const scaledRect = {
         x: rect.x / scale, y: rect.y / scale,
         w: rect.w / scale,  h: rect.h / scale
       };
-      pill.className = 'detection-pill pill-found';
-      pill.textContent = '✓ Board detected — tap to capture';
+      _smoothRect = smoothRect(_smoothRect, scaledRect);
+
+      if (_detStreak >= DET_CONFIRM) {
+        _lastRect = { ..._smoothRect };
+        pill.className = 'detection-pill pill-found';
+        pill.textContent = '✓ Board detected — tap to capture';
+      } else {
+        // Still confirming — keep showing "searching" to avoid premature trigger
+        pill.className = 'detection-pill pill-searching';
+        pill.textContent = '◈ Searching for board…';
+      }
     } else {
+      _detStreak = 0;
+      _smoothRect = null;
       _lastRect = null;
       pill.className = 'detection-pill pill-searching';
       pill.textContent = '◈ Searching for board…';
@@ -1146,49 +1163,122 @@ const App = (() => {
   }
 
   // ── Board region detection via Lichess color fingerprint ──
-  function colorMatchesLichess(r, g, b, tol = 48) {
-    const cs = LICHESS_COLORS;
-    const targets = [cs.lightSq, cs.darkSq, cs.lightHL, cs.darkHL];
-    return targets.some(([tr,tg,tb]) =>
-      Math.abs(r-tr) < tol && Math.abs(g-tg) < tol && Math.abs(b-tb) < tol
-    );
+
+  // Tighter tolerance — 30 prevents common false positives from skin
+  // tones, wood surfaces, etc. that would slip through at 48.
+  function colorMatchesLight(r, g, b, tol = 30) {
+    const [tr,tg,tb] = LICHESS_COLORS.lightSq;
+    return Math.abs(r-tr) < tol && Math.abs(g-tg) < tol && Math.abs(b-tb) < tol;
+  }
+  function colorMatchesDark(r, g, b, tol = 30) {
+    const [tr,tg,tb] = LICHESS_COLORS.darkSq;
+    return Math.abs(r-tr) < tol && Math.abs(g-tg) < tol && Math.abs(b-tb) < tol;
+  }
+  function colorMatchesLichess(r, g, b) {
+    return colorMatchesLight(r,g,b) || colorMatchesDark(r,g,b) ||
+      (() => { const [tr,tg,tb] = LICHESS_COLORS.lightHL; return Math.abs(r-tr)<30&&Math.abs(g-tg)<30&&Math.abs(b-tb)<30; })() ||
+      (() => { const [tr,tg,tb] = LICHESS_COLORS.darkHL;  return Math.abs(r-tr)<30&&Math.abs(g-tg)<30&&Math.abs(b-tb)<30; })();
+  }
+
+  // Validate that a candidate rect actually looks like a checkerboard.
+  // Samples the centre of each of the 64 squares and checks that
+  // neighbours alternate between light and dark — a random patch of
+  // board-coloured pixels will almost never pass this.
+  function validateCheckerboard(data, width, rect) {
+    const sqW = rect.w / 8, sqH = rect.h / 8;
+    let correct = 0, total = 0;
+
+    for (let row = 0; row < 8; row++) {
+      for (let col = 0; col < 8; col++) {
+        const cx = Math.round(rect.x + (col + 0.5) * sqW);
+        const cy = Math.round(rect.y + (row + 0.5) * sqH);
+        if (cx < 0 || cy < 0 || cx >= width || cy >= (data.length/4/width)) continue;
+
+        const i = (cy * width + cx) * 4;
+        const r = data[i], g = data[i+1], b = data[i+2];
+        const expectLight = (row + col) % 2 === 0;
+        const isLight = colorMatchesLight(r, g, b, 38);
+        const isDark  = colorMatchesDark(r, g, b, 38);
+
+        if (!isLight && !isDark) { total++; continue; } // piece on square — skip
+        if (expectLight && isLight) correct++;
+        if (!expectLight && isDark) correct++;
+        total++;
+      }
+    }
+    // Need at least 55% of sampled squares to match expected pattern
+    return total > 20 && (correct / total) > 0.55;
   }
 
   function detectBoardRegion(data, width, height) {
-    let minX = width, maxX = 0, minY = height, maxY = 0;
-    let count = 0;
+    let lightMinX = width, lightMaxX = 0, lightMinY = height, lightMaxY = 0, lightCount = 0;
+    let darkMinX  = width, darkMaxX  = 0, darkMinY  = height, darkMaxY  = 0, darkCount  = 0;
 
-    // Sample every other pixel for speed
-    for (let y = 0; y < height; y += 2) {
-      for (let x = 0; x < width; x += 2) {
+    for (let y = 0; y < height; y += 3) {
+      for (let x = 0; x < width; x += 3) {
         const i = (y * width + x) * 4;
-        if (colorMatchesLichess(data[i], data[i+1], data[i+2])) {
-          count++;
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
+        const r = data[i], g = data[i+1], b = data[i+2];
+        if (colorMatchesLight(r, g, b)) {
+          lightCount++;
+          if (x < lightMinX) lightMinX = x; if (x > lightMaxX) lightMaxX = x;
+          if (y < lightMinY) lightMinY = y; if (y > lightMaxY) lightMaxY = y;
+        } else if (colorMatchesDark(r, g, b)) {
+          darkCount++;
+          if (x < darkMinX) darkMinX = x; if (x > darkMaxX) darkMaxX = x;
+          if (y < darkMinY) darkMinY = y; if (y > darkMaxY) darkMaxY = y;
         }
       }
     }
 
-    // Need a meaningful number of board pixels
-    if (count < (width * height) / (4 * 100)) return null;
+    // Must have BOTH light and dark square colors — a single color is not a board
+    const minPx = (width * height) / (9 * 120); // adjust for stride-3 sampling
+    if (lightCount < minPx || darkCount < minPx) return null;
 
+    // Use the union bounding box
+    const minX = Math.min(lightMinX, darkMinX);
+    const minY = Math.min(lightMinY, darkMinY);
+    const maxX = Math.max(lightMaxX, darkMaxX);
+    const maxY = Math.max(lightMaxY, darkMaxY);
     const bw = maxX - minX, bh = maxY - minY;
-    if (bw < 40 || bh < 40) return null;
 
-    // Sanity: chess board should be roughly square
+    if (bw < 60 || bh < 60) return null;
+
+    // Board must be roughly square
     const ratio = bw / bh;
-    if (ratio < 0.55 || ratio > 1.8) return null;
+    if (ratio < 0.65 || ratio > 1.55) return null;
 
-    // Add small padding
-    const pad = 4;
-    return {
+    // Light and dark bounding boxes must significantly overlap (both exist in same region)
+    const overlapX = Math.max(0, Math.min(lightMaxX, darkMaxX) - Math.max(lightMinX, darkMinX));
+    const overlapY = Math.max(0, Math.min(lightMaxY, darkMaxY) - Math.max(lightMinY, darkMinY));
+    if (overlapX < bw * 0.3 || overlapY < bh * 0.3) return null;
+
+    const pad = 6;
+    const rect = {
       x: Math.max(0, minX - pad),
       y: Math.max(0, minY - pad),
-      w: Math.min(width - minX, bw + pad * 2),
-      h: Math.min(height - minY, bh + pad * 2)
+      w: Math.min(width  - (minX - pad), bw + pad * 2),
+      h: Math.min(height - (minY - pad), bh + pad * 2)
+    };
+
+    // Checkerboard pattern validation — most expensive check, do last
+    if (!validateCheckerboard(data, width, rect)) return null;
+
+    return rect;
+  }
+
+  // ── Temporal smoothing state ───────────────────────────────
+  let _detStreak    = 0;   // consecutive frames with a valid detection
+  let _smoothRect   = null; // exponentially smoothed rect
+  const DET_CONFIRM = 4;   // frames needed before announcing "found"
+  const SMOOTH_A    = 0.35; // EMA alpha — lower = smoother but slower
+
+  function smoothRect(prev, next) {
+    if (!prev) return { ...next };
+    return {
+      x: prev.x + SMOOTH_A * (next.x - prev.x),
+      y: prev.y + SMOOTH_A * (next.y - prev.y),
+      w: prev.w + SMOOTH_A * (next.w - prev.w),
+      h: prev.h + SMOOTH_A * (next.h - prev.h),
     };
   }
 
