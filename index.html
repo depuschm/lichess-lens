@@ -1275,37 +1275,69 @@ const App = (() => {
     const y1 = Math.min(height - 1, Math.round(rect.y + rect.h));
     if (x1 - x0 < 30 || y1 - y0 < 30) return null;
 
-    // For each row, track leftmost and rightmost board-colored pixel.
-    // For each col, track topmost and bottommost board-colored pixel.
-    const leftPts = [], rightPts = [], topPts = [], bottomPts = [];
-    // Use stride 2 for speed — still enough points for a reliable fit
-    const stride = 2;
+    const MIN_RUN = 3; // min consecutive board-colored pixels to accept boundary
+    const TRIM    = 0.12; // trim outermost 12% of boundary points before fitting
+    const stride  = 2;
 
+    const leftPts = [], rightPts = [], topPts = [], bottomPts = [];
+
+    // Per-row: find leftmost and rightmost positions with a run of ≥MIN_RUN pixels
     for (let y = y0; y <= y1; y += stride) {
       let rowLeft = -1, rowRight = -1;
+
+      // Scan left→right, find first run of MIN_RUN
+      let run = 0, runStart = -1;
       for (let x = x0; x <= x1; x++) {
         const i = (y * width + x) * 4;
         if (colorMatchesLichess(data[i], data[i+1], data[i+2])) {
-          if (rowLeft === -1) rowLeft = x;
-          rowRight = x;
-        }
+          if (run === 0) runStart = x;
+          run++;
+          if (run >= MIN_RUN && rowLeft === -1) rowLeft = runStart;
+        } else { run = 0; }
       }
-      if (rowLeft !== -1) {
+
+      // Scan right→left, find first run of MIN_RUN
+      run = 0; runStart = -1;
+      for (let x = x1; x >= x0; x--) {
+        const i = (y * width + x) * 4;
+        if (colorMatchesLichess(data[i], data[i+1], data[i+2])) {
+          if (run === 0) runStart = x;
+          run++;
+          if (run >= MIN_RUN && rowRight === -1) rowRight = runStart;
+        } else { run = 0; }
+      }
+
+      if (rowLeft !== -1 && rowRight > rowLeft) {
         leftPts.push([rowLeft, y]);
         rightPts.push([rowRight, y]);
       }
     }
 
+    // Per-col: topmost and bottommost with run of ≥MIN_RUN
     for (let x = x0; x <= x1; x += stride) {
       let colTop = -1, colBottom = -1;
+
+      let run = 0, runStart = -1;
       for (let y = y0; y <= y1; y++) {
         const i = (y * width + x) * 4;
         if (colorMatchesLichess(data[i], data[i+1], data[i+2])) {
-          if (colTop === -1) colTop = y;
-          colBottom = y;
-        }
+          if (run === 0) runStart = y;
+          run++;
+          if (run >= MIN_RUN && colTop === -1) colTop = runStart;
+        } else { run = 0; }
       }
-      if (colTop !== -1) {
+
+      run = 0; runStart = -1;
+      for (let y = y1; y >= y0; y--) {
+        const i = (y * width + x) * 4;
+        if (colorMatchesLichess(data[i], data[i+1], data[i+2])) {
+          if (run === 0) runStart = y;
+          run++;
+          if (run >= MIN_RUN && colBottom === -1) colBottom = runStart;
+        } else { run = 0; }
+      }
+
+      if (colTop !== -1 && colBottom > colTop) {
         topPts.push([x, colTop]);
         bottomPts.push([x, colBottom]);
       }
@@ -1313,10 +1345,25 @@ const App = (() => {
 
     if (leftPts.length < 8 || topPts.length < 8) return null;
 
-    const lineLeft   = fitLinePCA(leftPts);
-    const lineRight  = fitLinePCA(rightPts);
-    const lineTop    = fitLinePCA(topPts);
-    const lineBottom = fitLinePCA(bottomPts);
+    // Percentile trim — sort by the boundary coordinate and drop outer TRIM fraction
+    // This rejects outlier pixels that landed far from the true board edge
+    function trimmed(pts, keyFn) {
+      const sorted = [...pts].sort((a, b) => keyFn(a) - keyFn(b));
+      const drop = Math.max(1, Math.round(sorted.length * TRIM));
+      return sorted.slice(drop, sorted.length - drop);
+    }
+
+    const tLeft   = trimmed(leftPts,   p => p[0]);
+    const tRight  = trimmed(rightPts,  p => -p[0]);
+    const tTop    = trimmed(topPts,    p => p[1]);
+    const tBottom = trimmed(bottomPts, p => -p[1]);
+
+    if (tLeft.length < 5 || tTop.length < 5) return null;
+
+    const lineLeft   = fitLinePCA(tLeft);
+    const lineRight  = fitLinePCA(tRight);
+    const lineTop    = fitLinePCA(tTop);
+    const lineBottom = fitLinePCA(tBottom);
 
     if (!lineLeft || !lineRight || !lineTop || !lineBottom) return null;
 
@@ -1327,14 +1374,13 @@ const App = (() => {
 
     if (!tl || !tr || !br || !bl) return null;
 
-    // Sanity: corners must lie within a reasonable margin of the detection rect
-    const margin = Math.max(rect.w, rect.h) * 0.35;
+    // Corners must stay within a tight margin of the detection rect
+    const margin = Math.max(rect.w, rect.h) * 0.20;
     const inBounds = ([x, y]) =>
       x > x0 - margin && x < x1 + margin &&
       y > y0 - margin && y < y1 + margin;
     if (![tl,tr,br,bl].every(inBounds)) return null;
 
-    // Sanity: resulting quad must be large enough
     const qw = Math.max(tr[0],br[0]) - Math.min(tl[0],bl[0]);
     const qh = Math.max(bl[1],br[1]) - Math.min(tl[1],tr[1]);
     if (qw < 30 || qh < 30) return null;
