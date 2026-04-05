@@ -1094,15 +1094,21 @@ const App = (() => {
     ctx.clearRect(0, 0, w, h);
 
     if (_lastRect) {
-      const sx = w / (_frameW || w);
-      const sy = h / (_frameH || h);
+      // _lastRect and _lastCorners are stored in full video pixel coords.
+      // We need to map them to the overlay display size.
+      // During live scanning _frameW is 0, so read videoWidth directly.
+      const vid = document.getElementById('video');
+      const vidW = vid.videoWidth  || _frameW || w;
+      const vidH = vid.videoHeight || _frameH || h;
+      const sx = w / vidW;
+      const sy = h / vidH;
 
       // Use refined corners if available, otherwise fall back to rect corners
       const corners = _lastCorners || [
-        [_lastRect.x, _lastRect.y],
+        [_lastRect.x,              _lastRect.y],
         [_lastRect.x + _lastRect.w, _lastRect.y],
         [_lastRect.x + _lastRect.w, _lastRect.y + _lastRect.h],
-        [_lastRect.x, _lastRect.y + _lastRect.h],
+        [_lastRect.x,              _lastRect.y + _lastRect.h],
       ];
 
       const pts = corners.map(([x, y]) => [x * sx, y * sy]);
