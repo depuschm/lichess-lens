@@ -1183,11 +1183,20 @@ const App = (() => {
       if (_detStreak >= DET_CONFIRM) {
         _lastRect = { ..._smoothRect };
 
-        // Run Sobel corner refinement every 6 confirmed frames
-        if (_detStreak % 6 === 0 || !_lastCorners) {
+        // Run corner refinement every 4 confirmed frames
+        if (_detStreak % 4 === 0 || !_lastCorners) {
           const refined = refineCorners(imgData.data, proc.width, proc.height, rect);
           if (refined) {
-            _lastCorners = refined.map(([x, y]) => [x / scale, y / scale]);
+            const scaledCorners = refined.map(([x, y]) => [x / scale, y / scale]);
+            // EMA-smooth the corners too so they don't jump
+            if (!_lastCorners) {
+              _lastCorners = scaledCorners;
+            } else {
+              _lastCorners = _lastCorners.map(([px, py], i) => [
+                px + SMOOTH_A * (scaledCorners[i][0] - px),
+                py + SMOOTH_A * (scaledCorners[i][1] - py),
+              ]);
+            }
           }
         }
 
@@ -1212,78 +1221,108 @@ const App = (() => {
     }
   }
 
-  // ── Sobel edge-based corner refinement ─────────────────────
-  // Projects horizontal and vertical Sobel edge strength onto the
-  // X and Y axes within the candidate rect, then finds the four
-  // outermost strong-edge positions — these are the board boundaries.
+  // ── Corner refinement via boundary line fitting ────────────
+  // For each row find leftmost/rightmost board pixel → fit left & right edge lines.
+  // For each col find topmost/bottommost board pixel → fit top & bottom edge lines.
+  // Intersect the 4 lines → true quadrilateral corners even on a tilted board.
 
-  function sobelEdge(data, width, height) {
-    const edge = new Float32Array(width * height);
-    const lum = (r, c) => {
-      const i = (r * width + c) * 4;
-      return 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
-    };
-    for (let y = 1; y < height - 1; y++) {
-      for (let x = 1; x < width - 1; x++) {
-        const gx = -lum(y-1,x-1) + lum(y-1,x+1)
-                   -2*lum(y,x-1) + 2*lum(y,x+1)
-                   -lum(y+1,x-1) + lum(y+1,x+1);
-        const gy = -lum(y-1,x-1) - 2*lum(y-1,x) - lum(y-1,x+1)
-                   +lum(y+1,x-1) + 2*lum(y+1,x) + lum(y+1,x+1);
-        edge[y * width + x] = Math.sqrt(gx*gx + gy*gy);
-      }
-    }
-    return edge;
+  function fitLinePCA(points) {
+    // Fit a line through points using PCA (orthogonal regression).
+    // Returns [a, b, c] where ax + by = c, with a²+b²=1.
+    const n = points.length;
+    if (n < 4) return null;
+    let sx = 0, sy = 0, sxx = 0, sxy = 0, syy = 0;
+    for (const [x, y] of points) { sx += x; sy += y; sxx += x*x; sxy += x*y; syy += y*y; }
+    const mx = sx/n, my = sy/n;
+    const cxx = sxx/n - mx*mx;
+    const cxy = sxy/n - mx*my;
+    const cyy = syy/n - my*my;
+    // Normal to line = eigenvector of smallest eigenvalue of covariance matrix
+    const theta = 0.5 * Math.atan2(2*cxy, cxx - cyy);
+    const a = Math.cos(theta + Math.PI/2);
+    const b = Math.sin(theta + Math.PI/2);
+    const c = a*mx + b*my;
+    return [a, b, c];
   }
 
-  function findEdgePeak(proj, from, to, fromEdge, searchFraction = 0.25) {
-    const span = to - from;
-    const searchLen = Math.round(span * searchFraction);
-    // Search inward from each side for the strongest peak
-    let bestFrom = from, bestFromVal = -1;
-    for (let i = from; i < from + searchLen; i++) {
-      if (proj[i] > bestFromVal) { bestFromVal = proj[i]; bestFrom = i; }
-    }
-    let bestTo = to, bestToVal = -1;
-    for (let i = to; i > to - searchLen; i--) {
-      if (proj[i] > bestToVal) { bestToVal = proj[i]; bestTo = i; }
-    }
-    return [bestFrom, bestTo];
+  function intersectLines([a1,b1,c1], [a2,b2,c2]) {
+    const det = a1*b2 - a2*b1;
+    if (Math.abs(det) < 1e-8) return null;
+    return [(c1*b2 - c2*b1)/det, (a1*c2 - a2*c1)/det];
   }
 
   function refineCorners(data, width, height, rect) {
-    // Clamp rect to image
-    const x0 = Math.max(1, Math.round(rect.x));
-    const y0 = Math.max(1, Math.round(rect.y));
-    const x1 = Math.min(width - 2,  Math.round(rect.x + rect.w));
-    const y1 = Math.min(height - 2, Math.round(rect.y + rect.h));
-    if (x1 - x0 < 20 || y1 - y0 < 20) return null;
+    const x0 = Math.max(0, Math.round(rect.x));
+    const y0 = Math.max(0, Math.round(rect.y));
+    const x1 = Math.min(width  - 1, Math.round(rect.x + rect.w));
+    const y1 = Math.min(height - 1, Math.round(rect.y + rect.h));
+    if (x1 - x0 < 30 || y1 - y0 < 30) return null;
 
-    const edge = sobelEdge(data, width, height);
+    // For each row, track leftmost and rightmost board-colored pixel.
+    // For each col, track topmost and bottommost board-colored pixel.
+    const leftPts = [], rightPts = [], topPts = [], bottomPts = [];
+    // Use stride 2 for speed — still enough points for a reliable fit
+    const stride = 2;
 
-    // Project edges onto X axis (sum columns) and Y axis (sum rows)
-    const projX = new Float32Array(width);
-    const projY = new Float32Array(height);
-    for (let y = y0; y < y1; y++) {
-      for (let x = x0; x < x1; x++) {
-        const e = edge[y * width + x];
-        projX[x] += e;
-        projY[y] += e;
+    for (let y = y0; y <= y1; y += stride) {
+      let rowLeft = -1, rowRight = -1;
+      for (let x = x0; x <= x1; x++) {
+        const i = (y * width + x) * 4;
+        if (colorMatchesLichess(data[i], data[i+1], data[i+2])) {
+          if (rowLeft === -1) rowLeft = x;
+          rowRight = x;
+        }
+      }
+      if (rowLeft !== -1) {
+        leftPts.push([rowLeft, y]);
+        rightPts.push([rowRight, y]);
       }
     }
 
-    const [left, right] = findEdgePeak(projX, x0, x1);
-    const [top,  bottom] = findEdgePeak(projY, y0, y1);
+    for (let x = x0; x <= x1; x += stride) {
+      let colTop = -1, colBottom = -1;
+      for (let y = y0; y <= y1; y++) {
+        const i = (y * width + x) * 4;
+        if (colorMatchesLichess(data[i], data[i+1], data[i+2])) {
+          if (colTop === -1) colTop = y;
+          colBottom = y;
+        }
+      }
+      if (colTop !== -1) {
+        topPts.push([x, colTop]);
+        bottomPts.push([x, colBottom]);
+      }
+    }
 
-    // Sanity check — refined region must be reasonably large
-    if (right - left < 30 || bottom - top < 30) return null;
+    if (leftPts.length < 8 || topPts.length < 8) return null;
 
-    return [
-      [left,  top],
-      [right, top],
-      [right, bottom],
-      [left,  bottom],
-    ];
+    const lineLeft   = fitLinePCA(leftPts);
+    const lineRight  = fitLinePCA(rightPts);
+    const lineTop    = fitLinePCA(topPts);
+    const lineBottom = fitLinePCA(bottomPts);
+
+    if (!lineLeft || !lineRight || !lineTop || !lineBottom) return null;
+
+    const tl = intersectLines(lineLeft,  lineTop);
+    const tr = intersectLines(lineRight, lineTop);
+    const br = intersectLines(lineRight, lineBottom);
+    const bl = intersectLines(lineLeft,  lineBottom);
+
+    if (!tl || !tr || !br || !bl) return null;
+
+    // Sanity: corners must lie within a reasonable margin of the detection rect
+    const margin = Math.max(rect.w, rect.h) * 0.35;
+    const inBounds = ([x, y]) =>
+      x > x0 - margin && x < x1 + margin &&
+      y > y0 - margin && y < y1 + margin;
+    if (![tl,tr,br,bl].every(inBounds)) return null;
+
+    // Sanity: resulting quad must be large enough
+    const qw = Math.max(tr[0],br[0]) - Math.min(tl[0],bl[0]);
+    const qh = Math.max(bl[1],br[1]) - Math.min(tl[1],tr[1]);
+    if (qw < 30 || qh < 30) return null;
+
+    return [tl, tr, br, bl];
   }
 
   // ── Temporal smoothing state ───────────────────────────────
