@@ -1305,6 +1305,12 @@ const App = (() => {
     };
   }
 
+  // ── Board region detection via Lichess color fingerprint ──
+
+  function colorMatchesLight(r, g, b, tol = 44) {
+    const [tr,tg,tb] = LICHESS_COLORS.lightSq;
+    return Math.abs(r-tr) < tol && Math.abs(g-tg) < tol && Math.abs(b-tb) < tol;
+  }
   function colorMatchesDark(r, g, b, tol = 44) {
     const [tr,tg,tb] = LICHESS_COLORS.darkSq;
     return Math.abs(r-tr) < tol && Math.abs(g-tg) < tol && Math.abs(b-tb) < tol;
