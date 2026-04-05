@@ -1058,8 +1058,10 @@ const App = (() => {
     const ov   = document.getElementById('scan-overlay');
     let running = true;
     _detStreak  = 0;
+    _lostStreak = 0;
     _smoothRect = null;
     _lastRect   = null;
+    _lastCorners = null;
 
     function loop() {
       if (!running) return;
@@ -1094,29 +1096,63 @@ const App = (() => {
     if (_lastRect) {
       const sx = w / (_frameW || w);
       const sy = h / (_frameH || h);
-      // draw last detected rectangle
-      const rx = _lastRect.x * sx, ry = _lastRect.y * sy;
-      const rw = _lastRect.w * sx, rh = _lastRect.h * sy;
 
+      // Use refined corners if available, otherwise fall back to rect corners
+      const corners = _lastCorners || [
+        [_lastRect.x, _lastRect.y],
+        [_lastRect.x + _lastRect.w, _lastRect.y],
+        [_lastRect.x + _lastRect.w, _lastRect.y + _lastRect.h],
+        [_lastRect.x, _lastRect.y + _lastRect.h],
+      ];
+
+      const pts = corners.map(([x, y]) => [x * sx, y * sy]);
+
+      // Draw quadrilateral outline
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < 4; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+      ctx.closePath();
       ctx.strokeStyle = '#4af0c0';
       ctx.lineWidth = 2.5;
-      ctx.setLineDash([8,4]);
-      ctx.strokeRect(rx, ry, rw, rh);
+      ctx.setLineDash([8, 4]);
+      ctx.stroke();
       ctx.setLineDash([]);
 
-      // Corner ticks
-      const cs = 18;
-      [[rx,ry],[rx+rw,ry],[rx,ry+rh],[rx+rw,ry+rh]].forEach(([cx,cy], i) => {
-        const dx = i % 2 === 0 ? cs : -cs;
-        const dy = i < 2 ? cs : -cs;
+      // Corner L-brackets
+      const cs = 16;
+      const dirs = [[-1,-1],[1,-1],[1,1],[-1,1]];
+      pts.forEach(([cx, cy], i) => {
+        const [dx, dy] = dirs[i];
         ctx.strokeStyle = '#f0c040';
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.moveTo(cx + dx, cy);
+        ctx.moveTo(cx + dx * cs, cy);
         ctx.lineTo(cx, cy);
-        ctx.lineTo(cx, cy + dy);
+        ctx.lineTo(cx, cy + dy * cs);
         ctx.stroke();
       });
+
+      // Draw subtle internal grid lines (8×8)
+      if (_lastCorners) {
+        ctx.strokeStyle = 'rgba(74,240,192,0.18)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([]);
+        for (let g = 1; g < 8; g++) {
+          const t = g / 8;
+          // Interpolate along top/bottom edges for vertical lines
+          const tx = pts[0][0] + t * (pts[1][0] - pts[0][0]);
+          const ty = pts[0][1] + t * (pts[1][1] - pts[0][1]);
+          const bx = pts[3][0] + t * (pts[2][0] - pts[3][0]);
+          const by = pts[3][1] + t * (pts[2][1] - pts[3][1]);
+          ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(bx, by); ctx.stroke();
+          // Interpolate along left/right edges for horizontal lines
+          const lx = pts[0][0] + t * (pts[3][0] - pts[0][0]);
+          const ly = pts[0][1] + t * (pts[3][1] - pts[0][1]);
+          const rx = pts[1][0] + t * (pts[2][0] - pts[1][0]);
+          const ry = pts[1][1] + t * (pts[2][1] - pts[1][1]);
+          ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(rx, ry); ctx.stroke();
+        }
+      }
     }
   }
 
@@ -1136,8 +1172,8 @@ const App = (() => {
     const pill = document.getElementById('detect-pill');
 
     if (rect) {
+      _lostStreak = 0;
       _detStreak++;
-      // Scale back to full video coords and smooth
       const scaledRect = {
         x: rect.x / scale, y: rect.y / scale,
         w: rect.w / scale,  h: rect.h / scale
@@ -1146,28 +1182,129 @@ const App = (() => {
 
       if (_detStreak >= DET_CONFIRM) {
         _lastRect = { ..._smoothRect };
+
+        // Run Sobel corner refinement every 6 confirmed frames
+        if (_detStreak % 6 === 0 || !_lastCorners) {
+          const refined = refineCorners(imgData.data, proc.width, proc.height, rect);
+          if (refined) {
+            _lastCorners = refined.map(([x, y]) => [x / scale, y / scale]);
+          }
+        }
+
         pill.className = 'detection-pill pill-found';
         pill.textContent = '✓ Board detected — tap to capture';
       } else {
-        // Still confirming — keep showing "searching" to avoid premature trigger
         pill.className = 'detection-pill pill-searching';
         pill.textContent = '◈ Searching for board…';
       }
     } else {
-      _detStreak = 0;
-      _smoothRect = null;
-      _lastRect = null;
-      pill.className = 'detection-pill pill-searching';
-      pill.textContent = '◈ Searching for board…';
+      _lostStreak++;
+      // Hysteresis: only drop "found" state after LOST_CONFIRM consecutive misses
+      if (_lostStreak >= LOST_CONFIRM) {
+        _detStreak = 0;
+        _smoothRect = null;
+        _lastRect = null;
+        _lastCorners = null;
+        pill.className = 'detection-pill pill-searching';
+        pill.textContent = '◈ Searching for board…';
+      }
+      // else: keep showing last known rect and "found" pill during brief occlusions
     }
   }
 
-  // ── Board region detection via Lichess color fingerprint ──
+  // ── Sobel edge-based corner refinement ─────────────────────
+  // Projects horizontal and vertical Sobel edge strength onto the
+  // X and Y axes within the candidate rect, then finds the four
+  // outermost strong-edge positions — these are the board boundaries.
 
-  function colorMatchesLight(r, g, b, tol = 44) {
-    const [tr,tg,tb] = LICHESS_COLORS.lightSq;
-    return Math.abs(r-tr) < tol && Math.abs(g-tg) < tol && Math.abs(b-tb) < tol;
+  function sobelEdge(data, width, height) {
+    const edge = new Float32Array(width * height);
+    const lum = (r, c) => {
+      const i = (r * width + c) * 4;
+      return 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+    };
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        const gx = -lum(y-1,x-1) + lum(y-1,x+1)
+                   -2*lum(y,x-1) + 2*lum(y,x+1)
+                   -lum(y+1,x-1) + lum(y+1,x+1);
+        const gy = -lum(y-1,x-1) - 2*lum(y-1,x) - lum(y-1,x+1)
+                   +lum(y+1,x-1) + 2*lum(y+1,x) + lum(y+1,x+1);
+        edge[y * width + x] = Math.sqrt(gx*gx + gy*gy);
+      }
+    }
+    return edge;
   }
+
+  function findEdgePeak(proj, from, to, fromEdge, searchFraction = 0.25) {
+    const span = to - from;
+    const searchLen = Math.round(span * searchFraction);
+    // Search inward from each side for the strongest peak
+    let bestFrom = from, bestFromVal = -1;
+    for (let i = from; i < from + searchLen; i++) {
+      if (proj[i] > bestFromVal) { bestFromVal = proj[i]; bestFrom = i; }
+    }
+    let bestTo = to, bestToVal = -1;
+    for (let i = to; i > to - searchLen; i--) {
+      if (proj[i] > bestToVal) { bestToVal = proj[i]; bestTo = i; }
+    }
+    return [bestFrom, bestTo];
+  }
+
+  function refineCorners(data, width, height, rect) {
+    // Clamp rect to image
+    const x0 = Math.max(1, Math.round(rect.x));
+    const y0 = Math.max(1, Math.round(rect.y));
+    const x1 = Math.min(width - 2,  Math.round(rect.x + rect.w));
+    const y1 = Math.min(height - 2, Math.round(rect.y + rect.h));
+    if (x1 - x0 < 20 || y1 - y0 < 20) return null;
+
+    const edge = sobelEdge(data, width, height);
+
+    // Project edges onto X axis (sum columns) and Y axis (sum rows)
+    const projX = new Float32Array(width);
+    const projY = new Float32Array(height);
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const e = edge[y * width + x];
+        projX[x] += e;
+        projY[y] += e;
+      }
+    }
+
+    const [left, right] = findEdgePeak(projX, x0, x1);
+    const [top,  bottom] = findEdgePeak(projY, y0, y1);
+
+    // Sanity check — refined region must be reasonably large
+    if (right - left < 30 || bottom - top < 30) return null;
+
+    return [
+      [left,  top],
+      [right, top],
+      [right, bottom],
+      [left,  bottom],
+    ];
+  }
+
+  // ── Temporal smoothing state ───────────────────────────────
+  let _detStreak    = 0;
+  let _lostStreak   = 0;
+  let _smoothRect   = null;
+  let _lastCorners  = null;   // refined corner positions [[x,y]×4] in full-video coords
+  const DET_CONFIRM  = 3;    // frames needed to confirm detection
+  const LOST_CONFIRM = 8;    // frames of miss before dropping "found" state
+  const SMOOTH_A     = 0.3;
+
+  function smoothRect(prev, next) {
+    if (!prev) return { ...next };
+    return {
+      x: prev.x + SMOOTH_A * (next.x - prev.x),
+      y: prev.y + SMOOTH_A * (next.y - prev.y),
+      w: prev.w + SMOOTH_A * (next.w - prev.w),
+      h: prev.h + SMOOTH_A * (next.h - prev.h),
+    };
+  }
+
   function colorMatchesDark(r, g, b, tol = 44) {
     const [tr,tg,tb] = LICHESS_COLORS.darkSq;
     return Math.abs(r-tr) < tol && Math.abs(g-tg) < tol && Math.abs(b-tb) < tol;
@@ -1223,21 +1360,6 @@ const App = (() => {
     };
   }
 
-  // ── Temporal smoothing state ───────────────────────────────
-  let _detStreak    = 0;
-  let _smoothRect   = null;
-  const DET_CONFIRM = 3;
-  const SMOOTH_A    = 0.35;
-
-  function smoothRect(prev, next) {
-    if (!prev) return { ...next };
-    return {
-      x: prev.x + SMOOTH_A * (next.x - prev.x),
-      y: prev.y + SMOOTH_A * (next.y - prev.y),
-      w: prev.w + SMOOTH_A * (next.w - prev.w),
-      h: prev.h + SMOOTH_A * (next.h - prev.h),
-    };
-  }
 
   // ── Capture frame ──────────────────────────────────────────
   function captureFrame() {
@@ -1278,8 +1400,10 @@ const App = (() => {
     const ctx = canvas.getContext('2d');
     ctx.putImageData(_frameData, 0, 0);
 
-    // Initialize corners from detected rect or default
-    if (_lastRect) {
+    // Use Sobel-refined corners if available, else fall back to color bbox
+    if (_lastCorners) {
+      _corners = _lastCorners.map(([x, y]) => [x / _frameW, y / _frameH]);
+    } else if (_lastRect) {
       const r = _lastRect;
       _corners = [
         [r.x / _frameW,           r.y / _frameH],
