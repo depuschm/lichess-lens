@@ -1164,20 +1164,20 @@ const App = (() => {
 
   // ── Board region detection via Lichess color fingerprint ──
 
-  // Tighter tolerance — 30 prevents common false positives from skin
-  // tones, wood surfaces, etc. that would slip through at 48.
-  function colorMatchesLight(r, g, b, tol = 30) {
+  // Tolerance of 42 — tight enough to reject most false positives but
+  // forgiving enough for camera white-balance and screen glare shifts.
+  function colorMatchesLight(r, g, b, tol = 42) {
     const [tr,tg,tb] = LICHESS_COLORS.lightSq;
     return Math.abs(r-tr) < tol && Math.abs(g-tg) < tol && Math.abs(b-tb) < tol;
   }
-  function colorMatchesDark(r, g, b, tol = 30) {
+  function colorMatchesDark(r, g, b, tol = 42) {
     const [tr,tg,tb] = LICHESS_COLORS.darkSq;
     return Math.abs(r-tr) < tol && Math.abs(g-tg) < tol && Math.abs(b-tb) < tol;
   }
   function colorMatchesLichess(r, g, b) {
     return colorMatchesLight(r,g,b) || colorMatchesDark(r,g,b) ||
-      (() => { const [tr,tg,tb] = LICHESS_COLORS.lightHL; return Math.abs(r-tr)<30&&Math.abs(g-tg)<30&&Math.abs(b-tb)<30; })() ||
-      (() => { const [tr,tg,tb] = LICHESS_COLORS.darkHL;  return Math.abs(r-tr)<30&&Math.abs(g-tg)<30&&Math.abs(b-tb)<30; })();
+      (() => { const [tr,tg,tb] = LICHESS_COLORS.lightHL; return Math.abs(r-tr)<42&&Math.abs(g-tg)<42&&Math.abs(b-tb)<42; })() ||
+      (() => { const [tr,tg,tb] = LICHESS_COLORS.darkHL;  return Math.abs(r-tr)<42&&Math.abs(g-tg)<42&&Math.abs(b-tb)<42; })();
   }
 
   // Validate that a candidate rect actually looks like a checkerboard.
@@ -1197,8 +1197,8 @@ const App = (() => {
         const i = (cy * width + cx) * 4;
         const r = data[i], g = data[i+1], b = data[i+2];
         const expectLight = (row + col) % 2 === 0;
-        const isLight = colorMatchesLight(r, g, b, 38);
-        const isDark  = colorMatchesDark(r, g, b, 38);
+        const isLight = colorMatchesLight(r, g, b, 50);
+        const isDark  = colorMatchesDark(r, g, b, 50);
 
         if (!isLight && !isDark) { total++; continue; } // piece on square — skip
         if (expectLight && isLight) correct++;
@@ -1206,8 +1206,8 @@ const App = (() => {
         total++;
       }
     }
-    // Need at least 55% of sampled squares to match expected pattern
-    return total > 20 && (correct / total) > 0.55;
+    // Need at least 40% of sampled squares to match expected pattern
+    return total > 20 && (correct / total) > 0.40;
   }
 
   function detectBoardRegion(data, width, height) {
