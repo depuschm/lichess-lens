@@ -1456,46 +1456,46 @@ const App = (() => {
   }
 
   // ── Adaptive calibration ───────────────────────────────────
-  // After a stable detection, sample the actual mean H/S/V of light and dark
-  // regions within the detected rect and blend them into _ref so subsequent
-  // frames use the real on-screen colors rather than hardcoded defaults.
+  // Samples pixels that ALREADY match the current HSV criteria (confirmed
+  // board squares, not pieces) and gently blends their measured H/S toward
+  // _ref. Only runs every 20 confirmed frames to avoid feedback loops.
   let _calFrames = 0;
 
   function calibrateColors(data, width, rect) {
-    if (++_calFrames % 8 !== 0) return; // only recalibrate every 8 confirmed frames
+    if (++_calFrames % 20 !== 0) return;
 
     const sqW = rect.w / 8, sqH = rect.h / 8;
-    let lH=0,lS=0,lV=0,lN=0, dH=0,dS=0,dV=0,dN=0;
+    let lH=0,lS=0,lN=0, dH=0,dS=0,dN=0;
 
-    // Sample centre of a handful of squares we expect to be empty-ish
-    const sampleSquares = [
-      [0,0],[2,0],[4,0],[6,0],[1,1],[3,1],[5,1],[7,1],
-      [0,6],[2,6],[4,6],[6,6],[1,7],[3,7],[5,7],[7,7],
-    ];
-    for (const [col, row] of sampleSquares) {
-      const cx = Math.round(rect.x + (col + 0.5) * sqW);
-      const cy = Math.round(rect.y + (row + 0.5) * sqH);
-      if (cx < 0 || cy < 0 || cx >= width || cy >= data.length/4/width) continue;
-      const i = (cy * width + cx) * 4;
-      const [h, s, v] = rgbToHsv(data[i], data[i+1], data[i+2]);
-      if (v < 0.08) continue; // skip very dark (piece or shadow)
-      const isExpectedLight = (row + col) % 2 === 0;
-      if (isExpectedLight) { lH+=h; lS+=s; lV+=v; lN++; }
-      else                 { dH+=h; dS+=s; dV+=v; dN++; }
+    // Sample centre rows 2-5 (most likely to be empty mid-game)
+    for (let row = 2; row <= 5; row++) {
+      for (let col = 0; col < 8; col++) {
+        const cx = Math.round(rect.x + (col + 0.5) * sqW);
+        const cy = Math.round(rect.y + (row + 0.5) * sqH);
+        if (cx < 0 || cy < 0 || cx >= width || cy >= data.length/4/width) continue;
+        const i = (cy * width + cx) * 4;
+        const r = data[i], g = data[i+1], b = data[i+2];
+        // Only use pixels that already pass the current match — guarantees
+        // we're sampling a real board square, not a piece or shadow
+        const isLight = colorMatchesLight(r, g, b);
+        const isDark  = colorMatchesDark(r, g, b);
+        if (!isLight && !isDark) continue;
+        const [h, s] = rgbToHsv(r, g, b);
+        if (isLight) { lH += h; lS += s; lN++; }
+        else         { dH += h; dS += s; dN++; }
+      }
     }
 
-    if (lN >= 4 && dN >= 4) {
-      const newLH = lH/lN, newLS = lS/lN, newLV = lV/lN;
-      const newDH = dH/dN, newDS = dS/dN, newDV = dV/dN;
-      // Sanity: light must be brighter than dark
-      if (newLV > newDV * MIN_CONTRAST_RATIO) {
-        const a = 0.15; // slow blend so a bad sample doesn't destabilize detection
+    if (lN >= 3 && dN >= 3) {
+      const newLH = lH/lN, newLS = lS/lN;
+      const newDH = dH/dN, newDS = dS/dN;
+      // Sanity: hues must stay in a plausible warm-brown range
+      if (newLH > 10 && newLH < 65 && newDH > 10 && newDH < 65 && newLH > newDH - 15) {
+        const a = 0.07; // very slow blend — prevents a bad sample destabilizing detection
         _ref.lightH = _ref.lightH + a * (newLH - _ref.lightH);
         _ref.lightS = _ref.lightS + a * (newLS - _ref.lightS);
-        _ref.lightV = _ref.lightV + a * (newLV - _ref.lightV);
         _ref.darkH  = _ref.darkH  + a * (newDH - _ref.darkH);
         _ref.darkS  = _ref.darkS  + a * (newDS - _ref.darkS);
-        _ref.darkV  = _ref.darkV  + a * (newDV - _ref.darkV);
       }
     }
   }
