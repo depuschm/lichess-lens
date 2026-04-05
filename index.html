@@ -1088,30 +1088,36 @@ const App = (() => {
     if (_detLoop) { cancelAnimationFrame(_detLoop); _detLoop = null; }
   }
 
+  // Returns the transform mapping full-video pixel coords → screen display coords,
+  // matching exactly what object-fit:cover does to the <video> element.
+  function getVideoCoverTransform(vid) {
+    const dw = vid.clientWidth,  dh = vid.clientHeight;
+    const vw = vid.videoWidth,   vh = vid.videoHeight;
+    if (!vw || !vh) return { scale: 1, ox: 0, oy: 0 };
+    const scale = Math.max(dw / vw, dh / vh);
+    return { scale, ox: (dw - vw * scale) / 2, oy: (dh - vh * scale) / 2 };
+  }
+
   function drawScanGuide(canvas) {
     const ctx = canvas.getContext('2d');
     const w = canvas.width, h = canvas.height;
     ctx.clearRect(0, 0, w, h);
 
     if (_lastRect) {
-      // _lastRect and _lastCorners are stored in full video pixel coords.
-      // We need to map them to the overlay display size.
-      // During live scanning _frameW is 0, so read videoWidth directly.
       const vid = document.getElementById('video');
-      const vidW = vid.videoWidth  || _frameW || w;
-      const vidH = vid.videoHeight || _frameH || h;
-      const sx = w / vidW;
-      const sy = h / vidH;
+      // _lastRect/_lastCorners are in full-video-pixel coords.
+      // Map to screen using the same object-fit:cover transform the browser applies.
+      const { scale: vs, ox, oy } = getVideoCoverTransform(vid);
+      const vmap = ([x, y]) => [x * vs + ox, y * vs + oy];
 
-      // Use refined corners if available, otherwise fall back to rect corners
       const corners = _lastCorners || [
-        [_lastRect.x,              _lastRect.y],
+        [_lastRect.x,               _lastRect.y],
         [_lastRect.x + _lastRect.w, _lastRect.y],
         [_lastRect.x + _lastRect.w, _lastRect.y + _lastRect.h],
-        [_lastRect.x,              _lastRect.y + _lastRect.h],
+        [_lastRect.x,               _lastRect.y + _lastRect.h],
       ];
 
-      const pts = corners.map(([x, y]) => [x * sx, y * sy]);
+      const pts = corners.map(vmap);
 
       // Draw quadrilateral outline
       ctx.beginPath();
