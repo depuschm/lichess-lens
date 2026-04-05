@@ -1062,8 +1062,6 @@ const App = (() => {
     _smoothRect = null;
     _lastRect   = null;
     _lastCorners = null;
-    _calFrames  = 0;
-    _ref = { lightH:36, lightS:0.24, lightV:0.94, darkH:28, darkS:0.45, darkV:0.71 };
 
     function loop() {
       if (!running) return;
@@ -1404,97 +1402,24 @@ const App = (() => {
     };
   }
 
-  // ── Lighting-independent color matching ───────────────────
-  // Uses HSV hue + saturation instead of absolute RGB values.
-  // Hue is nearly invariant to brightness/exposure changes.
-  // Lichess light sq #F0D9B5: H≈36°, S≈0.24, V≈0.94
-  // Lichess dark  sq #B58863: H≈28°, S≈0.45, V≈0.71
-
-  function rgbToHsv(r, g, b) {
-    r /= 255; g /= 255; b /= 255;
-    const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
-    let h = 0;
-    if (d > 0) {
-      if (max === r)      h = ((g - b) / d) % 6;
-      else if (max === g) h = (b - r) / d + 2;
-      else                h = (r - g) / d + 4;
-      h = h * 60; if (h < 0) h += 360;
-    }
-    return [h, max > 0 ? d / max : 0, max];
-  }
-
-  // Adaptive reference — starts at Lichess defaults, updated by calibration
-  let _ref = {
-    lightH: 36, lightS: 0.24, lightV: 0.94,
-    darkH:  28, darkS:  0.45, darkV:  0.71,
-  };
-
-  // Hue tolerance (°), saturation tolerance, min value (brightness floor)
-  const HUE_TOL  = 30;   // wider — camera white balance shifts hue ±25° easily
-  const SAT_TOL  = 0.30; // wider — screen gamma and exposure shift saturation
-  const VAL_MIN  = 0.10; // ignore near-black pixels
-  // Light squares must be brighter than dark squares (relative contrast check)
-  const MIN_CONTRAST_RATIO = 1.15;
+  // ── Color matching — RGB with per-channel tolerance ────────
+  // HSV matching proved too strict for camera-captured screens in
+  // practice (white balance, screen gamma, exposure all shift hue).
+  // Simple per-channel RGB tolerance is faster and more reliable.
+  // Tolerance of 55 handles typical camera-to-screen color shift
+  // while the dual-color requirement (both light AND dark needed)
+  // provides false-positive rejection without needing tight thresholds.
 
   function colorMatchesLight(r, g, b) {
-    const [h, s, v] = rgbToHsv(r, g, b);
-    if (v < VAL_MIN) return false;
-    const dh = Math.min(Math.abs(h - _ref.lightH), 360 - Math.abs(h - _ref.lightH));
-    return dh < HUE_TOL && Math.abs(s - _ref.lightS) < SAT_TOL;
+    const [tr,tg,tb] = LICHESS_COLORS.lightSq;
+    return Math.abs(r-tr) < 55 && Math.abs(g-tg) < 55 && Math.abs(b-tb) < 55;
   }
   function colorMatchesDark(r, g, b) {
-    const [h, s, v] = rgbToHsv(r, g, b);
-    if (v < VAL_MIN) return false;
-    const dh = Math.min(Math.abs(h - _ref.darkH), 360 - Math.abs(h - _ref.darkH));
-    return dh < HUE_TOL && Math.abs(s - _ref.darkS) < SAT_TOL;
+    const [tr,tg,tb] = LICHESS_COLORS.darkSq;
+    return Math.abs(r-tr) < 55 && Math.abs(g-tg) < 55 && Math.abs(b-tb) < 55;
   }
   function colorMatchesLichess(r, g, b) {
     return colorMatchesLight(r, g, b) || colorMatchesDark(r, g, b);
-  }
-
-  // ── Adaptive calibration ───────────────────────────────────
-  // Samples pixels that ALREADY match the current HSV criteria (confirmed
-  // board squares, not pieces) and gently blends their measured H/S toward
-  // _ref. Only runs every 20 confirmed frames to avoid feedback loops.
-  let _calFrames = 0;
-
-  function calibrateColors(data, width, rect) {
-    if (++_calFrames % 20 !== 0) return;
-
-    const sqW = rect.w / 8, sqH = rect.h / 8;
-    let lH=0,lS=0,lN=0, dH=0,dS=0,dN=0;
-
-    // Sample centre rows 2-5 (most likely to be empty mid-game)
-    for (let row = 2; row <= 5; row++) {
-      for (let col = 0; col < 8; col++) {
-        const cx = Math.round(rect.x + (col + 0.5) * sqW);
-        const cy = Math.round(rect.y + (row + 0.5) * sqH);
-        if (cx < 0 || cy < 0 || cx >= width || cy >= data.length/4/width) continue;
-        const i = (cy * width + cx) * 4;
-        const r = data[i], g = data[i+1], b = data[i+2];
-        // Only use pixels that already pass the current match — guarantees
-        // we're sampling a real board square, not a piece or shadow
-        const isLight = colorMatchesLight(r, g, b);
-        const isDark  = colorMatchesDark(r, g, b);
-        if (!isLight && !isDark) continue;
-        const [h, s] = rgbToHsv(r, g, b);
-        if (isLight) { lH += h; lS += s; lN++; }
-        else         { dH += h; dS += s; dN++; }
-      }
-    }
-
-    if (lN >= 3 && dN >= 3) {
-      const newLH = lH/lN, newLS = lS/lN;
-      const newDH = dH/dN, newDS = dS/dN;
-      // Sanity: hues must stay in a plausible warm-brown range
-      if (newLH > 10 && newLH < 65 && newDH > 10 && newDH < 65 && newLH > newDH - 15) {
-        const a = 0.07; // very slow blend — prevents a bad sample destabilizing detection
-        _ref.lightH = _ref.lightH + a * (newLH - _ref.lightH);
-        _ref.lightS = _ref.lightS + a * (newLS - _ref.lightS);
-        _ref.darkH  = _ref.darkH  + a * (newDH - _ref.darkH);
-        _ref.darkS  = _ref.darkS  + a * (newDS - _ref.darkS);
-      }
-    }
   }
 
   function detectBoardRegion(data, width, height) {
