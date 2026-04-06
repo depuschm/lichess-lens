@@ -1075,7 +1075,7 @@ const App = (() => {
 
       if (vid.readyState >= 2) {
         drawScanGuide(ov);
-        if (++_detFrame % 12 === 0) runDetection(vid, ov);
+        if (++_detFrame % 4 === 0) runDetection(vid, ov);
       }
       _detLoop = requestAnimationFrame(loop);
     }
@@ -1195,8 +1195,8 @@ const App = (() => {
       if (_detStreak >= DET_CONFIRM) {
         _lastRect = { ..._smoothRect };
 
-        // Run corner refinement every 4 confirmed frames
-        if (_detStreak % 4 === 0 || !_lastCorners) {
+        // Run corner refinement every confirmed frame
+        if (true) {
           const refined = refineCorners(imgData.data, proc.width, proc.height, rect);
           if (refined) {
             const scaledCorners = refined.map(([x, y]) => [x / scale, y / scale]);
@@ -1389,8 +1389,8 @@ const App = (() => {
   let _smoothRect   = null;
   let _lastCorners  = null;   // refined corner positions [[x,y]×4] in full-video coords
   const DET_CONFIRM  = 3;    // frames needed to confirm detection
-  const LOST_CONFIRM = 30;   // frames of miss before dropping "found" (30×12 frames ≈ 6s)
-  const SMOOTH_A     = 0.3;
+  const LOST_CONFIRM = 30;   // detection frames of miss before dropping
+  const SMOOTH_A     = 0.6;  // high alpha = fast tracking when camera moves
 
   function smoothRect(prev, next) {
     if (!prev) return { ...next };
