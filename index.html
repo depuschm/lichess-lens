@@ -1195,22 +1195,16 @@ const App = (() => {
       if (_detStreak >= DET_CONFIRM) {
         _lastRect = { ..._smoothRect };
 
-        // Run corner refinement every confirmed frame
-        if (true) {
-          const refined = refineCorners(imgData.data, proc.width, proc.height, rect);
-          if (refined) {
-            const scaledCorners = refined.map(([x, y]) => [x / scale, y / scale]);
-            // EMA-smooth the corners too so they don't jump
-            if (!_lastCorners) {
-              _lastCorners = scaledCorners;
-            } else {
-              _lastCorners = _lastCorners.map(([px, py], i) => [
-                px + SMOOTH_A * (scaledCorners[i][0] - px),
-                py + SMOOTH_A * (scaledCorners[i][1] - py),
-              ]);
-            }
-          }
-        }
+        // Use the coarse bounding rect corners directly — they are already
+        // the min/max extents of board-colored pixels, which is exactly the
+        // board boundary. Corner refinement attempts consistently made things
+        // worse due to piece interference and camera noise.
+        _lastCorners = [
+          [_lastRect.x,                _lastRect.y],
+          [_lastRect.x + _lastRect.w,  _lastRect.y],
+          [_lastRect.x + _lastRect.w,  _lastRect.y + _lastRect.h],
+          [_lastRect.x,                _lastRect.y + _lastRect.h],
+        ];
 
         pill.className = 'detection-pill pill-found';
         pill.textContent = '✓ Board detected — tap to capture';
@@ -1264,101 +1258,65 @@ const App = (() => {
   }
 
   function refineCorners(data, width, height, rect) {
-    const x0 = Math.max(0, Math.round(rect.x));
-    const y0 = Math.max(0, Math.round(rect.y));
-    const x1 = Math.min(width  - 1, Math.round(rect.x + rect.w));
-    const y1 = Math.min(height - 1, Math.round(rect.y + rect.h));
+    const x0 = Math.max(2, Math.round(rect.x));
+    const y0 = Math.max(2, Math.round(rect.y));
+    const x1 = Math.min(width  - 3, Math.round(rect.x + rect.w));
+    const y1 = Math.min(height - 3, Math.round(rect.y + rect.h));
     if (x1 - x0 < 30 || y1 - y0 < 30) return null;
 
-    const MIN_RUN = 3; // min consecutive board-colored pixels to accept boundary
-    const TRIM    = 0.12; // trim outermost 12% of boundary points before fitting
-    const stride  = 2;
+    // Expand search area outside the coarse rect so we start in background
+    const pad = Math.round(Math.min(rect.w, rect.h) * 0.10);
+    const sx0 = Math.max(0,          x0 - pad);
+    const sy0 = Math.max(0,          y0 - pad);
+    const sx1 = Math.min(width  - 1, x1 + pad);
+    const sy1 = Math.min(height - 1, y1 + pad);
 
+    const isBoard = (x, y) => {
+      const i = (y * width + x) * 4;
+      return colorMatchesLichess(data[i], data[i+1], data[i+2]);
+    };
+
+    // Sample only the middle 60% of each side (skip outer 20% on each end).
+    // Corner rows/columns are occupied by pieces in starting position —
+    // scanning there finds piece-edge pixels instead of board-edge pixels,
+    // which corrupts the line fit and produces wrong corners.
+    const N      = 20;
+    const TSTART = 0.20; // skip first 20%
+    const TEND   = 0.80; // skip last  20%
     const leftPts = [], rightPts = [], topPts = [], bottomPts = [];
 
-    // Per-row: find leftmost and rightmost positions with a run of ≥MIN_RUN pixels
-    for (let y = y0; y <= y1; y += stride) {
-      let rowLeft = -1, rowRight = -1;
+    for (let k = 0; k < N; k++) {
+      const t = TSTART + (TEND - TSTART) * (k + 0.5) / N;
 
-      // Scan left→right, find first run of MIN_RUN
-      let run = 0, runStart = -1;
-      for (let x = x0; x <= x1; x++) {
-        const i = (y * width + x) * 4;
-        if (colorMatchesLichess(data[i], data[i+1], data[i+2])) {
-          if (run === 0) runStart = x;
-          run++;
-          if (run >= MIN_RUN && rowLeft === -1) rowLeft = runStart;
-        } else { run = 0; }
+      // Left edge — scan left→right
+      const yL = Math.round(sy0 + (sy1 - sy0) * t);
+      for (let x = sx0; x <= sx1; x++) {
+        if (isBoard(x, yL)) { leftPts.push([x, yL]); break; }
       }
-
-      // Scan right→left, find first run of MIN_RUN
-      run = 0; runStart = -1;
-      for (let x = x1; x >= x0; x--) {
-        const i = (y * width + x) * 4;
-        if (colorMatchesLichess(data[i], data[i+1], data[i+2])) {
-          if (run === 0) runStart = x;
-          run++;
-          if (run >= MIN_RUN && rowRight === -1) rowRight = runStart;
-        } else { run = 0; }
+      // Right edge — scan right→left
+      const yR = Math.round(sy0 + (sy1 - sy0) * t);
+      for (let x = sx1; x >= sx0; x--) {
+        if (isBoard(x, yR)) { rightPts.push([x, yR]); break; }
       }
-
-      if (rowLeft !== -1 && rowRight > rowLeft) {
-        leftPts.push([rowLeft, y]);
-        rightPts.push([rowRight, y]);
+      // Top edge — scan top→bottom
+      const xT = Math.round(sx0 + (sx1 - sx0) * t);
+      for (let y = sy0; y <= sy1; y++) {
+        if (isBoard(xT, y)) { topPts.push([xT, y]); break; }
+      }
+      // Bottom edge — scan bottom→top
+      const xB = Math.round(sx0 + (sx1 - sx0) * t);
+      for (let y = sy1; y >= sy0; y--) {
+        if (isBoard(xB, y)) { bottomPts.push([xB, y]); break; }
       }
     }
 
-    // Per-col: topmost and bottommost with run of ≥MIN_RUN
-    for (let x = x0; x <= x1; x += stride) {
-      let colTop = -1, colBottom = -1;
+    if (leftPts.length < 8 || rightPts.length < 8 ||
+        topPts.length  < 8 || bottomPts.length < 8) return null;
 
-      let run = 0, runStart = -1;
-      for (let y = y0; y <= y1; y++) {
-        const i = (y * width + x) * 4;
-        if (colorMatchesLichess(data[i], data[i+1], data[i+2])) {
-          if (run === 0) runStart = y;
-          run++;
-          if (run >= MIN_RUN && colTop === -1) colTop = runStart;
-        } else { run = 0; }
-      }
-
-      run = 0; runStart = -1;
-      for (let y = y1; y >= y0; y--) {
-        const i = (y * width + x) * 4;
-        if (colorMatchesLichess(data[i], data[i+1], data[i+2])) {
-          if (run === 0) runStart = y;
-          run++;
-          if (run >= MIN_RUN && colBottom === -1) colBottom = runStart;
-        } else { run = 0; }
-      }
-
-      if (colTop !== -1 && colBottom > colTop) {
-        topPts.push([x, colTop]);
-        bottomPts.push([x, colBottom]);
-      }
-    }
-
-    if (leftPts.length < 8 || topPts.length < 8) return null;
-
-    // Percentile trim — sort by the boundary coordinate and drop outer TRIM fraction
-    // This rejects outlier pixels that landed far from the true board edge
-    function trimmed(pts, keyFn) {
-      const sorted = [...pts].sort((a, b) => keyFn(a) - keyFn(b));
-      const drop = Math.max(1, Math.round(sorted.length * TRIM));
-      return sorted.slice(drop, sorted.length - drop);
-    }
-
-    const tLeft   = trimmed(leftPts,   p => p[0]);
-    const tRight  = trimmed(rightPts,  p => -p[0]);
-    const tTop    = trimmed(topPts,    p => p[1]);
-    const tBottom = trimmed(bottomPts, p => -p[1]);
-
-    if (tLeft.length < 5 || tTop.length < 5) return null;
-
-    const lineLeft   = fitLinePCA(tLeft);
-    const lineRight  = fitLinePCA(tRight);
-    const lineTop    = fitLinePCA(tTop);
-    const lineBottom = fitLinePCA(tBottom);
+    const lineLeft   = fitLinePCA(leftPts);
+    const lineRight  = fitLinePCA(rightPts);
+    const lineTop    = fitLinePCA(topPts);
+    const lineBottom = fitLinePCA(bottomPts);
 
     if (!lineLeft || !lineRight || !lineTop || !lineBottom) return null;
 
@@ -1369,15 +1327,14 @@ const App = (() => {
 
     if (!tl || !tr || !br || !bl) return null;
 
-    // Corners must stay within a tight margin of the detection rect
-    const margin = Math.max(rect.w, rect.h) * 0.20;
+    const margin = Math.max(rect.w, rect.h) * 0.15;
     const inBounds = ([x, y]) =>
       x > x0 - margin && x < x1 + margin &&
       y > y0 - margin && y < y1 + margin;
-    if (![tl,tr,br,bl].every(inBounds)) return null;
+    if (![tl, tr, br, bl].every(inBounds)) return null;
 
-    const qw = Math.max(tr[0],br[0]) - Math.min(tl[0],bl[0]);
-    const qh = Math.max(bl[1],br[1]) - Math.min(tl[1],tr[1]);
+    const qw = Math.max(tr[0], br[0]) - Math.min(tl[0], bl[0]);
+    const qh = Math.max(bl[1], br[1]) - Math.min(tl[1], tr[1]);
     if (qw < 30 || qh < 30) return null;
 
     return [tl, tr, br, bl];
