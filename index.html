@@ -950,8 +950,9 @@ const App = (() => {
   let _boardState = emptyBoard(); // 8x8 array of null | {color:'w'|'b', type:'K'|'Q'|...'P'}
   let _flipped    = false;
   let _editSq     = null;  // {row, col}
-  let _pieceImgs  = {};    // key → HTMLImageElement
-  let _pieceMasks = {};    // key → Uint8Array (50×50 alpha mask)
+  let _pieceImgs  = {};    // key → HTMLImageElement (kept for display only)
+  let _pieceMasks = {};    // key → Uint8Array (50×50 silhouette mask)
+  let _actualBgColors = { light: null, dark: null }; // sampled from real image
   let _detLoop    = null;
   let _lastRect   = null;
   let _adjustScale= 1;
@@ -973,13 +974,31 @@ const App = (() => {
   }
 
   function loadPieceImg(key) {
-    return new Promise(resolve => {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => { _pieceImgs[key] = img; resolve(); };
-      img.onerror = resolve;
-      img.src = LICHESS_PIECES_BASE + key + '.svg';
-    });
+    const url = LICHESS_PIECES_BASE + key + '.svg';
+    // Load via fetch → blob URL so the image is treated as same-origin.
+    // Drawing a cross-origin <img> (even with crossOrigin='anonymous') to a canvas
+    // taints it and makes getImageData() throw a SecurityError, breaking mask building.
+    // A blob URL is always same-origin and never taints the canvas.
+    return fetch(url)
+      .then(r => {
+        if (!r.ok) throw new Error('fetch failed');
+        return r.blob();
+      })
+      .then(blob => new Promise(resolve => {
+        const objectUrl = URL.createObjectURL(blob);
+        const img = new Image();
+        img.onload = () => { _pieceImgs[key] = img; resolve(); };
+        img.onerror  = () => resolve();   // image still unusable — skip gracefully
+        img.src = objectUrl;
+      }))
+      .catch(() => new Promise(resolve => {
+        // Fallback: try direct load with crossOrigin (works if server sends CORS headers)
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload  = () => { _pieceImgs[key] = img; resolve(); };
+        img.onerror = () => resolve();
+        img.src = url;
+      }));
   }
 
   // ── Screen navigation ──────────────────────────────────────
@@ -1760,6 +1779,9 @@ const App = (() => {
     const cs = LICHESS_COLORS;
     const result = [];
 
+    // First pass: classify squares and accumulate actual empty-square colors
+    let lR=0,lG=0,lB=0,lN=0, dR=0,dG=0,dB=0,dN=0;
+
     for (let row = 0; row < 8; row++) {
       result.push([]);
       for (let col = 0; col < 8; col++) {
@@ -1774,6 +1796,9 @@ const App = (() => {
 
         if (bestDist < 28) {
           result[row].push(null);
+          // Accumulate actual empty square color for adaptive masking
+          if (isLight) { lR+=avg[0]; lG+=avg[1]; lB+=avg[2]; lN++; }
+          else          { dR+=avg[0]; dG+=avg[1]; dB+=avg[2]; dN++; }
           continue;
         }
 
@@ -1810,31 +1835,111 @@ const App = (() => {
         result[row].push({ color: pieceColor, type: '?' });
       }
     }
+    // Save sampled actual background colors for squareMask()
+    _actualBgColors.light = lN > 0 ? [lR/lN, lG/lN, lB/lN] : null;
+    _actualBgColors.dark  = dN > 0 ? [dR/dN, dG/dN, dB/dN] : null;
     return result;
   }
 
   // ── Piece type identification via silhouette matching ──────
 
-  function buildPieceMask(key) {
-    if (_pieceMasks[key]) return _pieceMasks[key];
-    const img = _pieceImgs[key];
-    if (!img) return null;
+  // ── Inline piece silhouettes ──────────────────────────────
+  // Draw a simple but shape-distinctive silhouette for each piece type.
+  // This removes all dependency on fetched SVGs / CORS / network.
+  function drawPieceSilhouette(ctx, type, s) {
+    const cx = s / 2;
+    ctx.save();
+    ctx.fillStyle = '#000';
+    switch (type) {
+      case 'P': // Pawn — small round head, narrow body, wide base
+        ctx.beginPath(); ctx.arc(cx, s*0.28, s*0.13, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(cx-s*0.09, s*0.40); ctx.lineTo(cx+s*0.09, s*0.40);
+        ctx.lineTo(cx+s*0.13, s*0.68); ctx.lineTo(cx-s*0.13, s*0.68);
+        ctx.closePath(); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(cx, s*0.78, s*0.20, s*0.08, 0, 0, Math.PI*2); ctx.fill();
+        break;
+      case 'N': // Knight — asymmetric horse-head profile
+        ctx.beginPath();
+        ctx.moveTo(cx-s*0.18, s*0.88);
+        ctx.lineTo(cx-s*0.18, s*0.52);
+        ctx.lineTo(cx-s*0.04, s*0.28);
+        ctx.lineTo(cx+s*0.14, s*0.10);
+        ctx.lineTo(cx+s*0.32, s*0.10);
+        ctx.lineTo(cx+s*0.32, s*0.28);
+        ctx.lineTo(cx+s*0.16, s*0.36);
+        ctx.lineTo(cx+s*0.26, s*0.52);
+        ctx.lineTo(cx+s*0.26, s*0.88);
+        ctx.closePath(); ctx.fill();
+        // ear bump
+        ctx.beginPath(); ctx.arc(cx+s*0.14, s*0.12, s*0.06, 0, Math.PI*2); ctx.fill();
+        break;
+      case 'B': // Bishop — tall narrow triangle + ball on top
+        ctx.beginPath(); ctx.arc(cx, s*0.14, s*0.08, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(cx, s*0.20);
+        ctx.lineTo(cx+s*0.19, s*0.62);
+        ctx.lineTo(cx-s*0.19, s*0.62);
+        ctx.closePath(); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(cx, s*0.74, s*0.21, s*0.09, 0, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(cx, s*0.85, s*0.23, s*0.08, 0, 0, Math.PI*2); ctx.fill();
+        break;
+      case 'R': // Rook — three battlements + wide rectangular body
+        ctx.fillRect(cx-s*0.27, s*0.10, s*0.14, s*0.22);
+        ctx.fillRect(cx-s*0.07, s*0.10, s*0.14, s*0.22);
+        ctx.fillRect(cx+s*0.13, s*0.10, s*0.14, s*0.22);
+        ctx.fillRect(cx-s*0.27, s*0.28, s*0.54, s*0.50);
+        ctx.beginPath(); ctx.ellipse(cx, s*0.84, s*0.25, s*0.09, 0, 0, Math.PI*2); ctx.fill();
+        break;
+      case 'Q': // Queen — five crown balls + wide tapered body
+        for (let i = -2; i <= 2; i++) {
+          ctx.beginPath(); ctx.arc(cx + i*s*0.115, s*0.17, s*0.076, 0, Math.PI*2); ctx.fill();
+        }
+        ctx.beginPath();
+        ctx.moveTo(cx-s*0.31, s*0.30);
+        ctx.lineTo(cx+s*0.31, s*0.30);
+        ctx.lineTo(cx+s*0.24, s*0.68);
+        ctx.lineTo(cx-s*0.24, s*0.68);
+        ctx.closePath(); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(cx, s*0.79, s*0.24, s*0.09, 0, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(cx, s*0.88, s*0.26, s*0.08, 0, 0, Math.PI*2); ctx.fill();
+        break;
+      case 'K': // King — cross on top + wide body
+        ctx.fillRect(cx-s*0.06, s*0.05, s*0.12, s*0.28); // vertical
+        ctx.fillRect(cx-s*0.17, s*0.13, s*0.34, s*0.12); // horizontal
+        ctx.fillRect(cx-s*0.26, s*0.35, s*0.52, s*0.44); // body
+        ctx.beginPath(); ctx.ellipse(cx, s*0.85, s*0.25, s*0.09, 0, 0, Math.PI*2); ctx.fill();
+        break;
+    }
+    ctx.restore();
+  }
 
+  function buildPieceMask(type) {
+    if (_pieceMasks[type]) return _pieceMasks[type];
     const c = document.createElement('canvas');
     c.width = c.height = 50;
     const ctx = c.getContext('2d');
-    ctx.drawImage(img, 0, 0, 50, 50);
+    // White background so getImageData never fails regardless of origin
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, 50, 50);
+    drawPieceSilhouette(ctx, type, 50);
     const d = ctx.getImageData(0, 0, 50, 50).data;
     const mask = new Uint8Array(50*50);
-    for (let i = 0; i < 50*50; i++) mask[i] = d[i*4+3] > 100 ? 1 : 0;
-    _pieceMasks[key] = mask;
+    for (let i = 0; i < 50*50; i++) {
+      // Any dark pixel is "piece" (silhouette drawn in black on white)
+      mask[i] = (d[i*4] < 128) ? 1 : 0;
+    }
+    _pieceMasks[type] = mask;
     return mask;
   }
 
   function squareMask(imgData, bSize, col, row) {
     const sqSize = bSize / 8;
     const isLight = (row + col) % 2 === 0;
-    const bgColor = isLight ? LICHESS_COLORS.lightSq : LICHESS_COLORS.darkSq;
+    // Use actual sampled background colors if available, fall back to Lichess defaults
+    const bgColor = isLight
+      ? (_actualBgColors.light || LICHESS_COLORS.lightSq)
+      : (_actualBgColors.dark  || LICHESS_COLORS.darkSq);
 
     const outSize = 50;
     const ratio = outSize / sqSize;
@@ -1854,21 +1959,25 @@ const App = (() => {
     return mask;
   }
 
-  function maskSimilarity(m1, m2) {
-    // Jaccard similarity
-    let inter = 0, union = 0;
-    for (let i = 0; i < m1.length; i++) {
-      if (m1[i] || m2[i]) union++;
-      if (m1[i] && m2[i]) inter++;
+  function maskSimilarity(squareMask, templateMask) {
+    // F1 score: harmonic mean of precision and recall.
+    // Unlike Jaccard, this doesn't bias toward larger templates —
+    // a queen template won't blindly win just because it has more pixels.
+    let inter = 0, sqCount = 0, tmCount = 0;
+    for (let i = 0; i < squareMask.length; i++) {
+      if (squareMask[i]) sqCount++;
+      if (templateMask[i]) tmCount++;
+      if (squareMask[i] && templateMask[i]) inter++;
     }
-    return union === 0 ? 0 : inter / union;
+    if (inter === 0) return 0;
+    const precision = inter / tmCount;   // fraction of template covered by square
+    const recall    = inter / sqCount;   // fraction of square covered by template
+    return 2 * precision * recall / (precision + recall);
   }
 
   async function identifyPieceTypes(imgData, bSize) {
-    // Pre-build all masks
-    for (const c of PIECE_COLORS)
-      for (const t of PIECE_TYPES)
-        buildPieceMask(c + t);
+    // Pre-build all type masks (they are color-independent silhouettes)
+    for (const t of PIECE_TYPES) buildPieceMask(t);
 
     for (let row = 0; row < 8; row++) {
       for (let col = 0; col < 8; col++) {
@@ -1879,15 +1988,14 @@ const App = (() => {
         let bestType = 'P', bestScore = -1;
 
         for (const t of PIECE_TYPES) {
-          const key = cell.color + t;
-          const tm = _pieceMasks[key];
+          const tm = _pieceMasks[t];
           if (!tm) continue;
           const score = maskSimilarity(sqMask, tm);
           if (score > bestScore) { bestScore = score; bestType = t; }
         }
 
         // Confidence threshold — keep '?' if too low
-        cell.type = bestScore > 0.12 ? bestType : '?';
+        cell.type = bestScore > 0.10 ? bestType : '?';
       }
     }
   }
