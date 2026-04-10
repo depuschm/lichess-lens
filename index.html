@@ -924,7 +924,7 @@ html, body {
 // ChessLens — Main Application
 // ═══════════════════════════════════════════════════════════════
 
-const LICHESS_PIECES_BASE = 'https://lichess1.org/assets/piece/cburnett/';
+const LICHESS_PIECES_BASE = './assets/pieces/';
 const PIECE_TYPES   = ['K','Q','R','B','N','P'];
 const PIECE_COLORS  = ['w','b'];
 const PIECE_UNICODE = {
@@ -974,31 +974,12 @@ const App = (() => {
   }
 
   function loadPieceImg(key) {
-    const url = LICHESS_PIECES_BASE + key + '.svg';
-    // Load via fetch → blob URL so the image is treated as same-origin.
-    // Drawing a cross-origin <img> (even with crossOrigin='anonymous') to a canvas
-    // taints it and makes getImageData() throw a SecurityError, breaking mask building.
-    // A blob URL is always same-origin and never taints the canvas.
-    return fetch(url)
-      .then(r => {
-        if (!r.ok) throw new Error('fetch failed');
-        return r.blob();
-      })
-      .then(blob => new Promise(resolve => {
-        const objectUrl = URL.createObjectURL(blob);
-        const img = new Image();
-        img.onload = () => { _pieceImgs[key] = img; resolve(); };
-        img.onerror  = () => resolve();   // image still unusable — skip gracefully
-        img.src = objectUrl;
-      }))
-      .catch(() => new Promise(resolve => {
-        // Fallback: try direct load with crossOrigin (works if server sends CORS headers)
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.onload  = () => { _pieceImgs[key] = img; resolve(); };
-        img.onerror = () => resolve();
-        img.src = url;
-      }));
+    return new Promise(resolve => {
+      const img = new Image();
+      img.onload  = () => { _pieceImgs[key] = img; resolve(); };
+      img.onerror = () => resolve();
+      img.src = LICHESS_PIECES_BASE + key + '.svg';
+    });
   }
 
   // ── Screen navigation ──────────────────────────────────────
@@ -1843,92 +1824,20 @@ const App = (() => {
 
   // ── Piece type identification via silhouette matching ──────
 
-  // ── Inline piece silhouettes ──────────────────────────────
-  // Draw a simple but shape-distinctive silhouette for each piece type.
-  // This removes all dependency on fetched SVGs / CORS / network.
-  function drawPieceSilhouette(ctx, type, s) {
-    const cx = s / 2;
-    ctx.save();
-    ctx.fillStyle = '#000';
-    switch (type) {
-      case 'P': // Pawn — small round head, narrow body, wide base
-        ctx.beginPath(); ctx.arc(cx, s*0.28, s*0.13, 0, Math.PI*2); ctx.fill();
-        ctx.beginPath();
-        ctx.moveTo(cx-s*0.09, s*0.40); ctx.lineTo(cx+s*0.09, s*0.40);
-        ctx.lineTo(cx+s*0.13, s*0.68); ctx.lineTo(cx-s*0.13, s*0.68);
-        ctx.closePath(); ctx.fill();
-        ctx.beginPath(); ctx.ellipse(cx, s*0.78, s*0.20, s*0.08, 0, 0, Math.PI*2); ctx.fill();
-        break;
-      case 'N': // Knight — asymmetric horse-head profile
-        ctx.beginPath();
-        ctx.moveTo(cx-s*0.18, s*0.88);
-        ctx.lineTo(cx-s*0.18, s*0.52);
-        ctx.lineTo(cx-s*0.04, s*0.28);
-        ctx.lineTo(cx+s*0.14, s*0.10);
-        ctx.lineTo(cx+s*0.32, s*0.10);
-        ctx.lineTo(cx+s*0.32, s*0.28);
-        ctx.lineTo(cx+s*0.16, s*0.36);
-        ctx.lineTo(cx+s*0.26, s*0.52);
-        ctx.lineTo(cx+s*0.26, s*0.88);
-        ctx.closePath(); ctx.fill();
-        // ear bump
-        ctx.beginPath(); ctx.arc(cx+s*0.14, s*0.12, s*0.06, 0, Math.PI*2); ctx.fill();
-        break;
-      case 'B': // Bishop — tall narrow triangle + ball on top
-        ctx.beginPath(); ctx.arc(cx, s*0.14, s*0.08, 0, Math.PI*2); ctx.fill();
-        ctx.beginPath();
-        ctx.moveTo(cx, s*0.20);
-        ctx.lineTo(cx+s*0.19, s*0.62);
-        ctx.lineTo(cx-s*0.19, s*0.62);
-        ctx.closePath(); ctx.fill();
-        ctx.beginPath(); ctx.ellipse(cx, s*0.74, s*0.21, s*0.09, 0, 0, Math.PI*2); ctx.fill();
-        ctx.beginPath(); ctx.ellipse(cx, s*0.85, s*0.23, s*0.08, 0, 0, Math.PI*2); ctx.fill();
-        break;
-      case 'R': // Rook — three battlements + wide rectangular body
-        ctx.fillRect(cx-s*0.27, s*0.10, s*0.14, s*0.22);
-        ctx.fillRect(cx-s*0.07, s*0.10, s*0.14, s*0.22);
-        ctx.fillRect(cx+s*0.13, s*0.10, s*0.14, s*0.22);
-        ctx.fillRect(cx-s*0.27, s*0.28, s*0.54, s*0.50);
-        ctx.beginPath(); ctx.ellipse(cx, s*0.84, s*0.25, s*0.09, 0, 0, Math.PI*2); ctx.fill();
-        break;
-      case 'Q': // Queen — five crown balls + wide tapered body
-        for (let i = -2; i <= 2; i++) {
-          ctx.beginPath(); ctx.arc(cx + i*s*0.115, s*0.17, s*0.076, 0, Math.PI*2); ctx.fill();
-        }
-        ctx.beginPath();
-        ctx.moveTo(cx-s*0.31, s*0.30);
-        ctx.lineTo(cx+s*0.31, s*0.30);
-        ctx.lineTo(cx+s*0.24, s*0.68);
-        ctx.lineTo(cx-s*0.24, s*0.68);
-        ctx.closePath(); ctx.fill();
-        ctx.beginPath(); ctx.ellipse(cx, s*0.79, s*0.24, s*0.09, 0, 0, Math.PI*2); ctx.fill();
-        ctx.beginPath(); ctx.ellipse(cx, s*0.88, s*0.26, s*0.08, 0, 0, Math.PI*2); ctx.fill();
-        break;
-      case 'K': // King — cross on top + wide body
-        ctx.fillRect(cx-s*0.06, s*0.05, s*0.12, s*0.28); // vertical
-        ctx.fillRect(cx-s*0.17, s*0.13, s*0.34, s*0.12); // horizontal
-        ctx.fillRect(cx-s*0.26, s*0.35, s*0.52, s*0.44); // body
-        ctx.beginPath(); ctx.ellipse(cx, s*0.85, s*0.25, s*0.09, 0, 0, Math.PI*2); ctx.fill();
-        break;
-    }
-    ctx.restore();
-  }
-
   function buildPieceMask(type) {
     if (_pieceMasks[type]) return _pieceMasks[type];
+    // Try both colors; use whichever image loaded. Masks are color-independent
+    // (we only use the alpha channel of the SVG silhouette).
+    const img = _pieceImgs['w' + type] || _pieceImgs['b' + type];
+    if (!img) return null;
+
     const c = document.createElement('canvas');
     c.width = c.height = 50;
     const ctx = c.getContext('2d');
-    // White background so getImageData never fails regardless of origin
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, 50, 50);
-    drawPieceSilhouette(ctx, type, 50);
+    ctx.drawImage(img, 0, 0, 50, 50);
     const d = ctx.getImageData(0, 0, 50, 50).data;
-    const mask = new Uint8Array(50*50);
-    for (let i = 0; i < 50*50; i++) {
-      // Any dark pixel is "piece" (silhouette drawn in black on white)
-      mask[i] = (d[i*4] < 128) ? 1 : 0;
-    }
+    const mask = new Uint8Array(50 * 50);
+    for (let i = 0; i < 50 * 50; i++) mask[i] = d[i * 4 + 3] > 60 ? 1 : 0;
     _pieceMasks[type] = mask;
     return mask;
   }
